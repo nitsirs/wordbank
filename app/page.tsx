@@ -36,10 +36,15 @@ export default function OnboardingPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const userRef = ref(db, `users/${username}`);
+    // Trim and validate username
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) return;
+
+    const userRef = ref(db, `users/${trimmedUsername}`);
     const snapshot = await get(userRef);
 
     if (!snapshot.exists()) {
+      // Initialize new user with word list
       const initializedWords = wordList.reduce<WordDictionary>((acc, word, index) => {
         let card = createEmptyCard();
         card.due = undefined;
@@ -56,7 +61,10 @@ export default function OnboardingPage() {
       await set(userRef, { words: initializedWords });
     }
 
-    Cookies.set('username', username, { expires: 30 });
+    // Update stored username in both cookie and localStorage
+    Cookies.set('username', trimmedUsername, { expires: 30 });
+    localStorage.setItem('username', trimmedUsername);
+    
     router.push('/quiz');
   };
 
