@@ -3,15 +3,25 @@
 import { useState, useEffect, useRef } from 'react';
 import { ref, get, update } from 'firebase/database';
 import { db } from '@/services/firebaseConfig';
-import { FSRS, createEmptyCard, Rating } from 'ts-fsrs';
+import { FSRS, Rating, Card as FSRSCard } from 'ts-fsrs';
 
 interface Word {
   id: string;
   text: string;
-  card: any; // TS-FSRS card type
+  card: FSRSCard;
 }
 
-const fsrs = new FSRS();
+interface WordData {
+  text: string;
+  card: FSRSCard;
+}
+
+// Add this interface
+interface FirebaseWordEntry {
+  [key: string]: WordData;
+}
+
+const fsrs = new FSRS({});
 
 export default function QuizPage() {
   const [word, setWord] = useState<Word | null>(null); // Current word to review
@@ -28,19 +38,20 @@ export default function QuizPage() {
     }
   }, []);
 
+  // Update the fetchNextWord function to use FirebaseWordEntry
   const fetchNextWord = async (username: string) => {
     const userRef = ref(db, `users/${username}`);
     const snapshot = await get(userRef);
 
     if (snapshot.exists()) {
-      const { words } = snapshot.val();
+      const { words }: { words: FirebaseWordEntry } = snapshot.val();
       const wordEntries = Object.entries(words);
 
       const now = new Date();
 
-      // Separate due cards and new cards
+      // Rest of the function remains the same
       const dueWords = wordEntries
-        .map(([id, data]: [string, any]) => ({
+        .map(([id, data]) => ({
           id,
           text: data.text,
           card: data.card,
@@ -49,20 +60,21 @@ export default function QuizPage() {
         .sort((a, b) => new Date(a.card.due).getTime() - new Date(b.card.due).getTime());
 
       const newCards = wordEntries
-        .map(([id, data]: [string, any]) => ({
+        .map(([id, data]: [string, WordData]) => ({
           id,
           text: data.text,
           card: data.card,
         }))
         .filter((w) => !w.card.due)
-        .sort((a, b) => parseInt(a.id.replace('wordId', '')) - parseInt(b.id.replace('wordId', ''))); // Sort by zero-padded IDs
+        .sort((a, b) => parseInt(a.id.replace('wordId', '')) - parseInt(b.id.replace('wordId', '')));
 
+      // Rest of the function remains the same
       if (dueWords.length > 0) {
-        setWord(dueWords[0]); // Set the first due card
-        startTimeRef.current = new Date(); // Start the timer
+        setWord(dueWords[0]);
+        startTimeRef.current = new Date();
       } else if (newCards.length > 0) {
         const newCard = newCards[0];
-        const defaultDueDate = now.toISOString();
+        const defaultDueDate = now;
         newCard.card.due = defaultDueDate;
 
         // Update Firebase with the new card's `due` date

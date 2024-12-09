@@ -11,6 +11,23 @@ interface User {
   progress: number; // Added for easier sorting
 }
 
+interface Card {
+  last_review?: string;
+  due?: string;
+  // Add other card properties as needed
+}
+
+interface Word {
+  text: string;
+  card: Card;
+}
+
+interface UserData {
+  words?: {
+    [key: string]: Word;
+  };
+}
+
 export default function DashboardPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,11 +43,11 @@ export default function DashboardPage() {
 
     if (snapshot.exists()) {
       const usersData = snapshot.val();
-      const userList: User[] = Object.entries(usersData).map(([username, data]: [string, any]) => {
+      const userList: User[] = Object.entries(usersData).map(([username, data]: [string, UserData]) => {
         const words = data.words || {};
         const totalCards = Object.keys(words).length;
         const reviewedCards = Object.values(words).filter(
-          (word: any) => word.card.last_review // Card has been reviewed at least once
+          (word: Word) => word.card.last_review // Card has been reviewed at least once
         ).length;
 
         const progress = totalCards > 0 ? (reviewedCards / totalCards) * 100 : 0;

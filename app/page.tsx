@@ -9,6 +9,20 @@ import { createEmptyCard } from 'ts-fsrs';
 import wordList from './wordList.json'; 
 import { cleanObject } from '@/utils/cleanObject'; 
 
+interface Card {
+  due?: Date;
+  // Add other card properties from ts-fsrs as needed
+}
+
+interface WordEntry {
+  text: string;
+  card: Card;
+}
+
+interface WordDictionary {
+  [key: string]: WordEntry;
+}
+
 export default function OnboardingPage() {
   const [username, setUsername] = useState('');
   const router = useRouter();
@@ -20,9 +34,9 @@ export default function OnboardingPage() {
     const snapshot = await get(userRef);
 
     if (!snapshot.exists()) {
-      const initializedWords = wordList.reduce((acc, word, index) => {
+      const initializedWords = wordList.reduce<WordDictionary>((acc, word, index) => {
         let card = createEmptyCard();
-        card.due = null; // No `due` date for new cards
+        card.due = undefined; // No `due` date for new cards
         card = cleanObject(card); // Ensure no undefined properties
 
         const paddedId = `wordId${String(index + 1).padStart(4, '0')}`; // Zero-padded ID
