@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/services/firebaseConfig';
 import { ref, get, set } from 'firebase/database';
 import { createEmptyCard } from 'ts-fsrs';
+import Cookies from 'js-cookie';
 import wordList from './wordList.json'; 
 import { cleanObject } from '@/utils/cleanObject'; 
 
@@ -24,6 +25,13 @@ interface WordDictionary {
 export default function OnboardingPage() {
   const [username, setUsername] = useState('');
   const router = useRouter();
+
+  useEffect(() => {
+    const savedUsername = Cookies.get('username');
+    if (savedUsername) {
+      setUsername(savedUsername); // Autofill instead of redirect
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,11 +54,10 @@ export default function OnboardingPage() {
       }, {});
 
       await set(userRef, { words: initializedWords });
-      console.log(`Initialized user: ${username}`);
     }
 
-    localStorage.setItem('username', username);
-    router.push(`/quiz`);
+    Cookies.set('username', username, { expires: 30 });
+    router.push('/quiz');
   };
 
   return (
