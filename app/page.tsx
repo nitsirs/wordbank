@@ -56,13 +56,13 @@ export default function OnboardingPage() {
   return (
     <main className="min-h-screen bg-[#FF6B00] flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md space-y-8">
-        <h1 className="text-white text-5xl font-bold text-center mb-12">Welcome</h1>
+        <h1 className="text-white text-5xl font-bold text-center mb-12">บัญชีคำ ป.1</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter your name"
+            placeholder="ใส่ชื่อเล่น"
             className="w-full p-4 rounded-lg text-lg text-center"
             required
           />
@@ -70,7 +70,7 @@ export default function OnboardingPage() {
             type="submit"
             className="w-full bg-[#333] text-white p-4 rounded-lg text-lg font-medium hover:bg-[#222] transition-colors"
           >
-            Start
+            เริ่ม
           </button>
         </form>
       </div>
