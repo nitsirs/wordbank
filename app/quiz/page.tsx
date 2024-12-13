@@ -16,121 +16,103 @@ interface WordData {
   card: FSRSCard;
 }
 
-// Add this interface
 interface FirebaseWordEntry {
   [key: string]: WordData;
 }
 
 const fsrs = new FSRS({});
 
-export default function QuizPage() {
-  const [word, setWord] = useState<Word | null>(null); // Current word to review
-  const [flashColor, setFlashColor] = useState<string | null>(null); // Feedback flash color
-  const startTimeRef = useRef<Date | null>(null); // Track start time for timing responses
+// Simplified debug logging
+const logCard = (prefix: string, { text, card }: { text: string; card: FSRSCard }) => {
+  console.log(`${prefix}:`, {
+    text,
+    due: card.due ? new Date(card.due).toLocaleString() : 'none',
+    reps: card.reps,
+    state: card.state
+  });
+};
 
-  // Fetch the first word on component mount
+export default function QuizPage() {
+  const [word, setWord] = useState<Word | null>(null);
+  const [flashColor, setFlashColor] = useState<string | null>(null);
+  const [cachedWords, setCachedWords] = useState<FirebaseWordEntry | null>(null);
+  const startTimeRef = useRef<Date | null>(null);
+
   useEffect(() => {
     const username = localStorage.getItem('username');
-    if (username) {
-      fetchNextWord(username);
-    } else {
-      window.location.href = '/'; // Redirect to onboarding if no username
-    }
+    if (username) initializeWords(username);
+    else window.location.href = '/';
   }, []);
 
-  // Update the fetchNextWord function to use FirebaseWordEntry
-  const fetchNextWord = async (username: string) => {
+  const initializeWords = async (username: string) => {
     const userRef = ref(db, `users/${username}`);
     const snapshot = await get(userRef);
 
     if (snapshot.exists()) {
       const { words }: { words: FirebaseWordEntry } = snapshot.val();
-      const wordEntries = Object.entries(words);
+      setCachedWords(words);
+      fetchNextWord(words);
+    }
+  };
 
-      const now = new Date();
+  const fetchNextWord = (wordsData: FirebaseWordEntry) => {
+    const now = new Date();
+    
+    const dueWords = Object.entries(wordsData)
+      .map(([id, data]) => ({ id, ...data }))
+      .filter(w => w.card.due && new Date(w.card.due) <= now)
+      .sort((a, b) => new Date(a.card.due).getTime() - new Date(b.card.due).getTime());
 
-      // Rest of the function remains the same
-      const dueWords = wordEntries
-        .map(([id, data]) => ({
-          id,
-          text: data.text,
-          card: data.card,
-        }))
-        .filter((w) => w.card.due && new Date(w.card.due) <= now)
-        .sort((a, b) => new Date(a.card.due).getTime() - new Date(b.card.due).getTime());
+    if (dueWords.length > 0) {
+      setWord(dueWords[0]);
+      startTimeRef.current = new Date();
+    } else {
+      const newCards = Object.entries(wordsData)
+        .map(([id, data]) => ({ id, ...data }))
+        .filter(w => !w.card.due)[0];
 
-      const newCards = wordEntries
-        .map(([id, data]: [string, WordData]) => ({
-          id,
-          text: data.text,
-          card: data.card,
-        }))
-        .filter((w) => !w.card.due)
-        .sort((a, b) => parseInt(a.id.replace('wordId', '')) - parseInt(b.id.replace('wordId', '')));
-
-      // Rest of the function remains the same
-      if (dueWords.length > 0) {
-        setWord(dueWords[0]);
+      if (newCards) {
+        newCards.card.due = now;
+        setWord(newCards);
         startTimeRef.current = new Date();
-      } else if (newCards.length > 0) {
-        const newCard = newCards[0];
-        const defaultDueDate = now;
-        newCard.card.due = defaultDueDate;
-
-        // Update Firebase with the new card's `due` date
-        const wordRef = ref(db, `users/${username}/words/${newCard.id}`);
-        await update(wordRef, { card: newCard.card });
-
-        setWord(newCard); // Set the new card
-        startTimeRef.current = new Date(); // Start the timer
-      } else {
-        alert('No more cards to review!');
       }
     }
   };
 
-  const handleWrong = async () => {
-    if (!word) return;
+  const handleReview = async (rating: Rating) => {
+    if (!word || !cachedWords) return;
 
     const username = localStorage.getItem('username')!;
     const now = new Date();
+    const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
 
-    // Update the card as "Again"
-    const updatedCard = fsrs.next(word.card, now, Rating.Again).card;
+    // Determine rating based on time and button clicked
+    let finalRating = rating;
+    if (rating === Rating.Good && elapsedTime <= 3) {
+      finalRating = Rating.Easy;
+    }
 
-    // Update Firebase with the updated card
+    logCard('Before review', word);
+    const updatedCard = fsrs.next(word.card, now, finalRating).card;
+    logCard('After review', { text: word.text, card: updatedCard });
+
+    // Update cache and Firebase
+    const updatedWords = { ...cachedWords };
+    updatedWords[word.id] = { text: word.text, card: updatedCard };
+    setCachedWords(updatedWords);
+
     const wordRef = ref(db, `users/${username}/words/${word.id}`);
     await update(wordRef, { card: updatedCard });
 
-    // Flash red feedback and fetch the next word
-    setFlashColor('bg-red-500');
+    // Set color based on rating
+    let color = 'bg-yellow-100'; // Good
+    if (finalRating === Rating.Easy) color = 'bg-green-100';
+    if (finalRating === Rating.Again) color = 'bg-red-100';
+
+    setFlashColor(color);
     setTimeout(() => {
       setFlashColor(null);
-      fetchNextWord(username);
-    }, 500);
-  };
-
-  const handleCorrect = async () => {
-    if (!word) return;
-
-    const username = localStorage.getItem('username')!;
-    const now = new Date();
-    const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000; // Time in seconds
-
-    const rating = elapsedTime <= 3 ? Rating.Easy : Rating.Good;
-
-    // Update the card with appropriate rating
-    const updatedCard = fsrs.next(word.card, now, rating).card;
-
-    // Update Firebase with the updated card
-    const wordRef = ref(db, `users/${username}/words/${word.id}`);
-    await update(wordRef, { card: updatedCard });
-
-    // Flash green for Easy and yellow for Good
-    setFlashColor(rating === Rating.Easy ? 'bg-green-500' : 'bg-yellow-500');
-    setTimeout(() => {
-      setFlashColor(null);
-      fetchNextWord(username);
+      fetchNextWord(updatedWords);
     }, 500);
   };
 
@@ -151,13 +133,13 @@ export default function QuizPage() {
             <div className="flex gap-4 w-full justify-center">
               <button
                 className="bg-red-500 text-white py-4 px-6 rounded-lg text-4xl w-1/2 hover:bg-red-600"
-                onClick={handleWrong}
+                onClick={() => handleReview(Rating.Again)}
               >
                 ✖
               </button>
               <button
                 className="bg-blue-500 text-white py-4 px-6 rounded-lg text-4xl w-1/2 hover:bg-blue-600"
-                onClick={handleCorrect}
+                onClick={() => handleReview(Rating.Good)}
               >
                 ✔
               </button>
