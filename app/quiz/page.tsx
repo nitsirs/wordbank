@@ -3,7 +3,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { ref, get, update } from 'firebase/database';
 import { db } from '@/services/firebaseConfig';
-import { FSRS, Rating, Card as FSRSCard } from 'ts-fsrs';
+import { FSRS, Card as FSRSCard } from 'ts-fsrs';
+
+// Define Grade enum values since ts-fsrs exports it only as type
+enum Grade {
+  Again = 1,
+  Hard = 2,
+  Good = 3,
+  Easy = 4
+}
 
 interface Word {
   id: string;
@@ -79,21 +87,21 @@ export default function QuizPage() {
     }
   };
 
-  const handleReview = async (rating: Rating) => {
+  const handleReview = async (grade: Grade) => {
     if (!word || !cachedWords) return;
 
     const username = localStorage.getItem('username')!;
     const now = new Date();
     const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
 
-    // Determine rating based on time and button clicked
-    let finalRating = rating;
-    if (rating === Rating.Good && elapsedTime <= 3) {
-      finalRating = Rating.Easy;
+    // Determine grade based on time and button clicked
+    let finalGrade = grade;
+    if (grade === Grade.Good && elapsedTime <= 3) {
+      finalGrade = Grade.Easy;
     }
 
     logCard('Before review', word);
-    const updatedCard = fsrs.next(word.card, now, finalRating).card;
+    const updatedCard = fsrs.next(word.card, now, finalGrade as unknown as import('ts-fsrs').Grade).card;
     logCard('After review', { text: word.text, card: updatedCard });
 
     // Update cache and Firebase
@@ -106,8 +114,8 @@ export default function QuizPage() {
 
     // Set color based on rating
     let color = 'bg-yellow-100'; // Good
-    if (finalRating === Rating.Easy) color = 'bg-green-100';
-    if (finalRating === Rating.Again) color = 'bg-red-100';
+    if (finalGrade === Grade.Easy) color = 'bg-green-100';
+    if (finalGrade === Grade.Again) color = 'bg-red-100';
 
     setFlashColor(color);
     setTimeout(() => {
@@ -133,13 +141,13 @@ export default function QuizPage() {
             <div className="flex gap-4 w-full justify-center">
               <button
                 className="bg-red-500 text-white py-4 px-6 rounded-lg text-4xl w-1/2 hover:bg-red-600"
-                onClick={() => handleReview(Rating.Again)}
+                onClick={() => handleReview(Grade.Again)}
               >
                 ✖
               </button>
               <button
                 className="bg-blue-500 text-white py-4 px-6 rounded-lg text-4xl w-1/2 hover:bg-blue-600"
-                onClick={() => handleReview(Rating.Good)}
+                onClick={() => handleReview(Grade.Good)}
               >
                 ✔
               </button>
