@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ref, get, update } from 'firebase/database';
 import { db } from '@/services/firebaseConfig';
 import { FSRS, Card as FSRSCard } from 'ts-fsrs';
+import audioQueue from '@/services/audioService';
 
 // Define Grade enum values since ts-fsrs exports it only as type
 enum Grade {
@@ -63,7 +64,34 @@ export default function QuizPage() {
     }
   };
 
-  const fetchNextWord = (wordsData: FirebaseWordEntry) => {
+  const preloadNextWords = async (wordsData: FirebaseWordEntry, currentWord: string) => {
+    const now = new Date();
+    const allWords = Object.entries(wordsData)
+      .map(([id, data]) => ({ id, ...data }))
+      .filter(w => w.text !== currentWord);
+
+    // Get next due words - reduced from 3 to 2 for mobile optimization
+    const nextDueWords = allWords
+      .filter(w => w.card.due && new Date(w.card.due) <= now)
+      .sort((a, b) => new Date(a.card.due).getTime() - new Date(b.card.due).getTime())
+      .slice(0, 2);
+
+    // Get next new word - reduced from 2 to 1 for mobile optimization
+    const nextNewWords = allWords
+      .filter(w => !w.card.due)
+      .slice(0, 1);
+
+    // Preload audio for both due and new words
+    await Promise.all([
+      ...nextDueWords,
+      ...nextNewWords
+    ].map(w => audioQueue.preload(w.text)));
+
+    // Clean old cache entries
+    await audioQueue.clearOldCache();
+  };
+
+  const fetchNextWord = async (wordsData: FirebaseWordEntry) => {
     const now = new Date();
     
     const dueWords = Object.entries(wordsData)
@@ -72,8 +100,12 @@ export default function QuizPage() {
       .sort((a, b) => new Date(a.card.due).getTime() - new Date(b.card.due).getTime());
 
     if (dueWords.length > 0) {
-      setWord(dueWords[0]);
+      const nextWord = dueWords[0];
+      setWord(nextWord);
       startTimeRef.current = new Date();
+      // Preload audio for current word and next words
+      await audioQueue.preload(nextWord.text);
+      await preloadNextWords(wordsData, nextWord.text);
     } else {
       const newCards = Object.entries(wordsData)
         .map(([id, data]) => ({ id, ...data }))
@@ -83,6 +115,9 @@ export default function QuizPage() {
         newCards.card.due = now;
         setWord(newCards);
         startTimeRef.current = new Date();
+        // Preload audio for current word and next words
+        await audioQueue.preload(newCards.text);
+        await preloadNextWords(wordsData, newCards.text);
       }
     }
   };
@@ -93,6 +128,13 @@ export default function QuizPage() {
     const username = localStorage.getItem('username')!;
     const now = new Date();
     const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
+
+    // Play audio when answering
+    try {
+      await audioQueue.play(word.text);
+    } catch (error) {
+      console.error('Error playing audio:', error);
+    }
 
     // Determine grade based on time and button clicked
     let finalGrade = grade;
