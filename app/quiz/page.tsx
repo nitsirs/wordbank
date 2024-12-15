@@ -129,17 +129,23 @@ export default function QuizPage() {
     const now = new Date();
     const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
 
-    // Play audio when answering
-    try {
-      await audioQueue.play(word.text);
-    } catch (error) {
-      console.error('Error playing audio:', error);
-    }
-
     // Determine grade based on time and button clicked
     let finalGrade = grade;
     if (grade === Grade.Good && elapsedTime <= 3) {
       finalGrade = Grade.Easy;
+    }
+
+    // Set color based on rating first
+    let color = 'bg-yellow-100'; // Good
+    if (finalGrade === Grade.Easy) color = 'bg-green-100';
+    if (finalGrade === Grade.Again) color = 'bg-red-100';
+    setFlashColor(color);
+
+    // Play audio after setting color
+    try {
+      await audioQueue.play(word.text);
+    } catch (error) {
+      console.error('Error playing audio:', error);
     }
 
     logCard('Before review', word);
@@ -154,12 +160,6 @@ export default function QuizPage() {
     const wordRef = ref(db, `users/${username}/words/${word.id}`);
     await update(wordRef, { card: updatedCard });
 
-    // Set color based on rating
-    let color = 'bg-yellow-100'; // Good
-    if (finalGrade === Grade.Easy) color = 'bg-green-100';
-    if (finalGrade === Grade.Again) color = 'bg-red-100';
-
-    setFlashColor(color);
     setTimeout(() => {
       setFlashColor(null);
       fetchNextWord(updatedWords);
