@@ -44,7 +44,7 @@ class AudioQueue {
   async preload(word: string): Promise<void> {
     try {
       const cache = await this.getCacheStorage();
-      const audioUrl = `/audio/word_${word}.mp3`;
+      const audioUrl = `/audio/trimmed/word_${word}.mp3`;
       
       const cachedResponse = await cache.match(audioUrl);
       if (!cachedResponse) {
@@ -74,7 +74,7 @@ class AudioQueue {
   async play(word: string): Promise<void> {
     return new Promise(async (resolve, reject) => {
       try {
-        const audioUrl = `/audio/word_${word}.mp3`;
+        const audioUrl = `/audio/trimmed/word_${word}.mp3`;
         let audio = this.queue.get(word);
 
         if (!audio) {
