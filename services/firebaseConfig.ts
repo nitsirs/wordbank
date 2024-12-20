@@ -1,6 +1,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
+import { getAnalytics, setAnalyticsCollectionEnabled, isSupported } from "firebase/analytics";
 import { getDatabase } from "firebase/database";
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
@@ -20,4 +20,21 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+
+// Initialize Analytics with debug mode
+const initAnalytics = async () => {
+  if (await isSupported()) {
+    const analytics = getAnalytics(app);
+    // Enable debug mode in development
+    if (process.env.NODE_ENV === 'development') {
+      setAnalyticsCollectionEnabled(analytics, true);
+      console.log('🔍 Firebase Analytics debug mode enabled');
+    }
+    return analytics;
+  }
+  console.log('⚠️ Firebase Analytics not supported in this environment');
+  return null;
+};
+
+export const analytics = await initAnalytics();
 export const db = getDatabase(app);

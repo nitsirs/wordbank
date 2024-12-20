@@ -8,6 +8,7 @@ import { createEmptyCard } from 'ts-fsrs';
 import Cookies from 'js-cookie';
 import wordList from './wordList.json'; 
 import { cleanObject } from '@/utils/cleanObject'; 
+import { analyticsService } from '@/services/analyticsService';
 
 interface Card {
   due?: Date;
@@ -59,6 +60,9 @@ export default function OnboardingPage() {
       }, {});
 
       await set(userRef, { words: initializedWords });
+      analyticsService.logUserSignup(trimmedUsername);
+    } else {
+      analyticsService.logUserLogin(trimmedUsername);
     }
 
     // Update stored username in both cookie and localStorage
