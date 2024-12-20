@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { ref, get, update } from 'firebase/database';
-import { db } from '@/services/firebaseConfig';
+import { getDbInstance } from '@/services/firebaseConfig';
 import { FSRS, Card as FSRSCard } from 'ts-fsrs';
 import audioQueue from '@/services/audioService';
 import { analyticsService } from '@/services/analyticsService';
@@ -64,7 +64,7 @@ export default function QuizPage() {
   }, []);
 
   const initializeWords = async (username: string) => {
-    const userRef = ref(db, `users/${username}`);
+    const userRef = ref(getDbInstance(), `users/${username}`);
     const snapshot = await get(userRef);
 
     if (snapshot.exists()) {
@@ -182,7 +182,7 @@ export default function QuizPage() {
     updatedWords[word.id] = { text: word.text, card: updatedCard, againCount };
     setCachedWords(updatedWords);
 
-    const wordRef = ref(db, `users/${username}/words/${word.id}`);
+    const wordRef = ref(getDbInstance(), `users/${username}/words/${word.id}`);
     await update(wordRef, { card: updatedCard });
 
     setTimeout(() => {

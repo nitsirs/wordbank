@@ -1,27 +1,36 @@
-import { analytics } from './firebaseConfig';
-import { logEvent } from 'firebase/analytics';
+import { getAnalyticsInstance } from './firebaseConfig';
+import { logEvent, Analytics } from 'firebase/analytics';
 
 class AnalyticsService {
   private sessionStartTime: number = 0;
   private cardsReviewedInSession: number = 0;
   private lastSessionDate: string | null = null;
   private currentStreak: number = 0;
+  private initialized: boolean = false;
+  private analyticsInstance: Analytics | null = null;
 
-  private logEvent(eventName: string, params: any) {
+  private async logEvent(eventName: string, params: any) {
     console.log(`📊 Firebase Event: ${eventName}`, params);
-    logEvent(analytics, eventName, params);
+    if (this.analyticsInstance) {
+      logEvent(this.analyticsInstance, eventName, params);
+    }
   }
 
-  constructor() {
-    this.lastSessionDate = localStorage.getItem('lastSessionDate');
-    this.currentStreak = parseInt(localStorage.getItem('currentStreak') || '0');
-    console.log('Analytics initialized:', {
-      lastSessionDate: this.lastSessionDate,
-      currentStreak: this.currentStreak
-    });
+  private async initialize() {
+    if (this.initialized) return;
+    
+    this.analyticsInstance = await getAnalyticsInstance();
+    
+    if (typeof window !== 'undefined') {
+      this.lastSessionDate = localStorage.getItem('lastSessionDate');
+      this.currentStreak = parseInt(localStorage.getItem('currentStreak') || '0');
+    }
+    
+    this.initialized = true;
   }
 
   startSession() {
+    this.initialize();
     console.log('Starting new session...');
     this.sessionStartTime = Date.now();
     this.cardsReviewedInSession = 0;
@@ -79,6 +88,7 @@ class AnalyticsService {
   }
 
   logCardReview(grade: string, responseTime: number, cardState: string) {
+    this.initialize();
     this.cardsReviewedInSession++;
     
     const params = {
