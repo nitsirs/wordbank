@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ref, get } from 'firebase/database';
-import { db } from '@/services/firebaseConfig';
+import { getDbInstance } from '@/services/firebaseConfig';
 
 interface User {
   username: string;
@@ -38,7 +38,7 @@ export default function DashboardPage() {
 
   const fetchUserProgress = async () => {
     setLoading(true);
-    const usersRef = ref(db, 'users');
+    const usersRef = ref(getDbInstance(), 'users');
     const snapshot = await get(usersRef);
 
     if (snapshot.exists()) {
