@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { db } from '@/services/firebaseConfig';
+import { getDbInstance } from '@/services/firebaseConfig';
 import { ref, get, set } from 'firebase/database';
 import { createEmptyCard } from 'ts-fsrs';
 import Cookies from 'js-cookie';
 import wordList from './wordList.json'; 
-import { cleanObject } from '@/utils/cleanObject'; 
+import { cleanObject } from '@/utils/cleanObject';
+import { analyticsService } from '@/services/analyticsService';
 
 interface Card {
   due?: Date;
@@ -40,7 +41,7 @@ export default function OnboardingPage() {
     const trimmedUsername = username.trim();
     if (!trimmedUsername) return;
 
-    const userRef = ref(db, `users/${trimmedUsername}`);
+    const userRef = ref(getDbInstance(), `users/${trimmedUsername}`);
     const snapshot = await get(userRef);
 
     if (!snapshot.exists()) {
@@ -59,6 +60,9 @@ export default function OnboardingPage() {
       }, {});
 
       await set(userRef, { words: initializedWords });
+      analyticsService.logUserSignup(trimmedUsername);
+    } else {
+      analyticsService.logUserLogin(trimmedUsername);
     }
 
     // Update stored username in both cookie and localStorage

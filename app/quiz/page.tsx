@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { ref, get, update } from 'firebase/database';
-import { db } from '@/services/firebaseConfig';
+import { getDbInstance } from '@/services/firebaseConfig';
 import { FSRS, Card as FSRSCard } from 'ts-fsrs';
 import audioQueue from '@/services/audioService';
+import { analyticsService } from '@/services/analyticsService';
 
 // Define Grade enum values since ts-fsrs exports it only as type
 enum Grade {
@@ -18,11 +19,13 @@ interface Word {
   id: string;
   text: string;
   card: FSRSCard;
+  againCount?: number;
 }
 
 interface WordData {
   text: string;
   card: FSRSCard;
+  againCount?: number;
 }
 
 interface FirebaseWordEntry {
@@ -48,13 +51,20 @@ export default function QuizPage() {
   const startTimeRef = useRef<Date | null>(null);
 
   useEffect(() => {
+    analyticsService.startSession();
+    return () => {
+      analyticsService.endSession();
+    };
+  }, []);
+
+  useEffect(() => {
     const username = localStorage.getItem('username');
     if (username) initializeWords(username);
     else window.location.href = '/';
   }, []);
 
   const initializeWords = async (username: string) => {
-    const userRef = ref(db, `users/${username}`);
+    const userRef = ref(getDbInstance(), `users/${username}`);
     const snapshot = await get(userRef);
 
     if (snapshot.exists()) {
@@ -129,6 +139,21 @@ export default function QuizPage() {
     const now = new Date();
     const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
 
+    // Track againCount separately from FSRS card
+    const againCount = grade === Grade.Again ? ((word.againCount || 0) + 1) : 0;
+
+    // Log analytics for this review with card state
+    analyticsService.logCardReview(
+      grade.toString(),
+      elapsedTime,
+      String(word.card.state)
+    );
+
+    // Track problem cards
+    if (grade === Grade.Again) {
+      analyticsService.logProblemCard(word.id, word.text, againCount);
+    }
+
     // Determine grade based on time and button clicked
     let finalGrade = grade;
     if (grade === Grade.Good && elapsedTime <= 3) {
@@ -154,10 +179,10 @@ export default function QuizPage() {
 
     // Update cache and Firebase
     const updatedWords = { ...cachedWords };
-    updatedWords[word.id] = { text: word.text, card: updatedCard };
+    updatedWords[word.id] = { text: word.text, card: updatedCard, againCount };
     setCachedWords(updatedWords);
 
-    const wordRef = ref(db, `users/${username}/words/${word.id}`);
+    const wordRef = ref(getDbInstance(), `users/${username}/words/${word.id}`);
     await update(wordRef, { card: updatedCard });
 
     setTimeout(() => {
