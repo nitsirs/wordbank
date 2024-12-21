@@ -139,6 +139,34 @@ export default function QuizPage() {
     const now = new Date();
     const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
 
+    // Determine grade based on response time
+    let finalGrade = grade;
+    if (grade === Grade.Good) {
+      if (elapsedTime <= 2) {
+        finalGrade = Grade.Easy;  // Under 2 seconds = Easy
+      } else if (elapsedTime > 5) {
+        finalGrade = Grade.Hard;  // Over 5 seconds = Hard
+      }
+      // Between 2-5 seconds stays Good
+    }
+
+    console.log(`Response time: ${elapsedTime.toFixed(1)}s -> Grade: ${finalGrade}`);
+
+    // Set color feedback
+    const color = {
+      [Grade.Again]: 'bg-red-100',
+      [Grade.Hard]: 'bg-orange-100',
+      [Grade.Good]: 'bg-yellow-100',
+      [Grade.Easy]: 'bg-green-100'
+    }[finalGrade];
+    
+    setFlashColor(color);
+
+    // Rest of the function remains unchanged
+    logCard('Before review', word);
+    const updatedCard = fsrs.next(word.card, now, finalGrade as unknown as import('ts-fsrs').Grade).card;
+    logCard('After review', { text: word.text, card: updatedCard });
+
     // Track againCount separately from FSRS card
     const againCount = grade === Grade.Again ? ((word.againCount || 0) + 1) : 0;
 
@@ -153,29 +181,6 @@ export default function QuizPage() {
     if (grade === Grade.Again) {
       analyticsService.logProblemCard(word.id, word.text, againCount);
     }
-
-    // Determine grade based on time and button clicked
-    let finalGrade = grade;
-    if (grade === Grade.Good && elapsedTime <= 3) {
-      finalGrade = Grade.Easy;
-    }
-
-    // Set color based on rating first
-    let color = 'bg-yellow-100'; // Good
-    if (finalGrade === Grade.Easy) color = 'bg-green-100';
-    if (finalGrade === Grade.Again) color = 'bg-red-100';
-    setFlashColor(color);
-
-    // Play audio after setting color
-    try {
-      await audioQueue.play(word.text);
-    } catch (error) {
-      console.error('Error playing audio:', error);
-    }
-
-    logCard('Before review', word);
-    const updatedCard = fsrs.next(word.card, now, finalGrade as unknown as import('ts-fsrs').Grade).card;
-    logCard('After review', { text: word.text, card: updatedCard });
 
     // Update cache and Firebase
     const updatedWords = { ...cachedWords };
