@@ -69,8 +69,12 @@ export default function DashboardTeacherPage() {
         };
       });
 
-      // Sort users by progress in descending order
-      const sortedUsers = userList.sort((a, b) => b.progress - a.progress);
+      // Sort users by mastery rate in descending order
+      const sortedUsers = userList.sort((a, b) => {
+        const aMasteryRate = a.totalCards > 0 ? (a.masteredCards / a.reviewedCards) : 0;
+        const bMasteryRate = b.totalCards > 0 ? (b.masteredCards / b.reviewedCards) : 0;
+        return bMasteryRate - aMasteryRate;
+      });
 
       setUsers(sortedUsers);
     }
@@ -97,7 +101,7 @@ export default function DashboardTeacherPage() {
                   {user.reviewedCards} / {user.totalCards} cards reviewed
                 </span>
                 <span className="text-sm text-gray-500">
-                  {user.masteredCards} cards mastered
+                  {user.masteredCards} cards mastered ({Math.round((user.masteredCards / user.reviewedCards) * 100)}%)
                 </span>
               </div>
               <div className="w-1/2">
