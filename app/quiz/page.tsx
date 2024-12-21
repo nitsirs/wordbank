@@ -162,6 +162,13 @@ export default function QuizPage() {
     
     setFlashColor(color);
 
+    // Play audio after setting color
+    try {
+      await audioQueue.play(word.text);
+    } catch (error) {
+      console.error('Error playing audio:', error);
+    }
+
     // Rest of the function remains unchanged
     logCard('Before review', word);
     const updatedCard = fsrs.next(word.card, now, finalGrade as unknown as import('ts-fsrs').Grade).card;
