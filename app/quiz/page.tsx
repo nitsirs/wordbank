@@ -239,7 +239,7 @@ const QuizPage = () => {
       await analyticsRef.current.updateUserAnalytics(username, {
         wordId: word.id,
         timeUsed: elapsedTime,
-        difficulty: finalGrade,
+        difficulty: updatedCard.difficulty,
         isMastered: updatedCard.difficulty < 5,
         isCorrect: finalGrade === Grade.Again ? 0 : 1  // 0 for Again (incorrect), 1 for all other grades (correct)
       });
