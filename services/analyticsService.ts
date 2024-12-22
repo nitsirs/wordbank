@@ -1,5 +1,6 @@
-import { getAnalyticsInstance } from './firebaseConfig';
+import { getAnalyticsInstance, getDbInstance } from './firebaseConfig';
 import { logEvent, Analytics } from 'firebase/analytics';
+import { ref, get, set, update } from 'firebase/database';
 
 class AnalyticsService {
   private sessionStartTime: number = 0;
@@ -10,6 +11,8 @@ class AnalyticsService {
   private analyticsInstance: Analytics | null = null;
 
   private async logEvent(eventName: string, params: any) {
+    if (typeof window === 'undefined') return;
+    
     console.log(`📊 Firebase Event: ${eventName}`, params);
     if (this.analyticsInstance) {
       logEvent(this.analyticsInstance, eventName, params);
@@ -17,19 +20,20 @@ class AnalyticsService {
   }
 
   private async initialize() {
+    if (typeof window === 'undefined') return;
     if (this.initialized) return;
     
     this.analyticsInstance = await getAnalyticsInstance();
     
-    if (typeof window !== 'undefined') {
-      this.lastSessionDate = localStorage.getItem('lastSessionDate');
-      this.currentStreak = parseInt(localStorage.getItem('currentStreak') || '0');
-    }
+    this.lastSessionDate = localStorage.getItem('lastSessionDate');
+    this.currentStreak = parseInt(localStorage.getItem('currentStreak') || '0');
     
     this.initialized = true;
   }
 
   startSession() {
+    if (typeof window === 'undefined') return;
+    
     this.initialize();
     console.log('Starting new session...');
     this.sessionStartTime = Date.now();
@@ -75,6 +79,8 @@ class AnalyticsService {
   }
 
   endSession() {
+    if (typeof window === 'undefined') return;
+    
     const sessionLength = Math.round((Date.now() - this.sessionStartTime) / 1000);
     console.log('Session ended:', {
       duration: sessionLength + 's',
@@ -88,6 +94,8 @@ class AnalyticsService {
   }
 
   logCardReview(grade: string, responseTime: number, cardState: string) {
+    if (typeof window === 'undefined') return;
+    
     this.initialize();
     this.cardsReviewedInSession++;
     
@@ -106,6 +114,8 @@ class AnalyticsService {
   }
 
   logProblemCard(cardId: string, text: string, consecutiveAgainCount: number) {
+    if (typeof window === 'undefined') return;
+    
     if (consecutiveAgainCount >= 2) {
       const params = {
         card_id: cardId,
@@ -119,6 +129,8 @@ class AnalyticsService {
   }
 
   logUserLogin(username: string) {
+    if (typeof window === 'undefined') return;
+    
     const lastLoginDate = localStorage.getItem(`lastLogin_${username}`);
     const today = new Date().toDateString();
     
@@ -155,6 +167,162 @@ class AnalyticsService {
     console.log('✨ New user signup:', params);
     this.logEvent('user_signup', params);
   }
+
+  async updateUserAnalytics(username: string, reviewData: {
+    wordId: string,
+    timeUsed: number,
+    difficulty: number,
+    isMastered: boolean
+  }) {
+    const db = getDbInstance();
+    const analyticsRef = ref(db, `analytics/${username}`);
+    const today = parseInt(new Date().toISOString().split('T')[0].replace(/-/g, ''));
+
+    // Get existing analytics data
+    const snapshot = await get(analyticsRef);
+    
+    if (!snapshot.exists()) {
+      // First time initialization - need to calculate from user data
+      const userRef = ref(db, `users/${username}/words`);
+      const userSnapshot = await get(userRef);
+      
+      if (userSnapshot.exists()) {
+        const words = userSnapshot.val();
+        let totalCardsEncountered = 0;
+        let masteredCards = 0;
+        
+        // Count total unique cards encountered and mastered cards
+        Object.values(words).forEach((word: any) => {
+          if (word.card) {
+            const hasBeenReviewed = word.card.reps !== undefined && word.card.reps > 0;
+            // Count unique cards encountered (reps > 0)
+            if (hasBeenReviewed) {
+              totalCardsEncountered++;
+              // Only count as mastered if the card has been reviewed AND difficulty < 5
+              if (word.card.difficulty !== undefined && word.card.difficulty < 5) {
+                masteredCards++;
+              }
+            }
+          }
+        });
+
+        // Initialize analytics with historical data
+        const analytics = {
+          study_days: [today],
+          total_cards_reviewed: [totalCardsEncountered + (reviewData.wordId in words ? 0 : 1)], // Only add 1 if it's a new word
+          mastered_cards: [masteredCards], // Don't add current review yet as it's included in the user data
+          daily_cards_reviewed: [1],
+          daily_session_time: [reviewData.timeUsed],
+          words: {
+            [reviewData.wordId]: {
+              time_used: [reviewData.timeUsed],
+              difficulty: [reviewData.difficulty]
+            }
+          }
+        };
+        
+        await set(analyticsRef, analytics);
+        return;
+      }
+    }
+
+    // Normal flow for existing analytics data
+    const analytics = snapshot.val() || {
+      study_days: [today],
+      total_cards_reviewed: [1],
+      mastered_cards: [0], // Start at 0 and let the recalculation handle it
+      daily_cards_reviewed: [1],
+      daily_session_time: [reviewData.timeUsed],
+      words: {
+        [reviewData.wordId]: {
+          time_used: [reviewData.timeUsed],
+          difficulty: [reviewData.difficulty]
+        }
+      }
+    };
+
+    if (analytics.study_days[analytics.study_days.length - 1] !== today) {
+      // New day
+      analytics.study_days.push(today);
+      analytics.daily_cards_reviewed.push(1);
+      analytics.daily_session_time.push(reviewData.timeUsed);
+      
+      // Get current total cards reviewed and mastered cards
+      const userRef = ref(db, `users/${username}/words`);
+      const userSnapshot = await get(userRef);
+      let currentTotalCards = 0;
+      let currentMasteredCards = 0;
+      
+      if (userSnapshot.exists()) {
+        const words = userSnapshot.val();
+        Object.values(words).forEach((word: any) => {
+          if (word.card) {
+            const hasBeenReviewed = word.card.reps !== undefined && word.card.reps > 0;
+            if (hasBeenReviewed) {
+              currentTotalCards++;
+              // Only count as mastered if the card has been reviewed AND difficulty < 5
+              if (word.card.difficulty !== undefined && word.card.difficulty < 5) {
+                currentMasteredCards++;
+              }
+            }
+          }
+        });
+      }
+      analytics.total_cards_reviewed.push(currentTotalCards);
+      analytics.mastered_cards.push(currentMasteredCards);
+    } else {
+      // Same day - update the last values
+      const lastIndex = analytics.study_days.length - 1;
+      analytics.daily_cards_reviewed[lastIndex]++;
+      analytics.daily_session_time[lastIndex] += reviewData.timeUsed;
+      
+      // Get current total cards reviewed and mastered cards
+      const userRef = ref(db, `users/${username}/words`);
+      const userSnapshot = await get(userRef);
+      let currentTotalCards = 0;
+      let currentMasteredCards = 0;
+      
+      if (userSnapshot.exists()) {
+        const words = userSnapshot.val();
+        Object.values(words).forEach((word: any) => {
+          if (word.card) {
+            const hasBeenReviewed = word.card.reps !== undefined && word.card.reps > 0;
+            if (hasBeenReviewed) {
+              currentTotalCards++;
+              // Only count as mastered if the card has been reviewed AND difficulty < 5
+              if (word.card.difficulty !== undefined && word.card.difficulty < 5) {
+                currentMasteredCards++;
+              }
+            }
+          }
+        });
+        analytics.total_cards_reviewed[lastIndex] = currentTotalCards;
+        analytics.mastered_cards[lastIndex] = currentMasteredCards;
+      }
+    }
+
+    // Update word-specific stats
+    if (!analytics.words[reviewData.wordId]) {
+      analytics.words[reviewData.wordId] = {
+        time_used: [reviewData.timeUsed],
+        difficulty: [reviewData.difficulty]
+      };
+    } else {
+      analytics.words[reviewData.wordId].time_used.push(reviewData.timeUsed);
+      analytics.words[reviewData.wordId].difficulty.push(reviewData.difficulty);
+    }
+
+    await set(analyticsRef, analytics);
+  }
 }
 
-export const analyticsService = new AnalyticsService(); 
+export const analyticsService = new AnalyticsService();
+
+const username = localStorage.getItem('username');
+console.log('Current username:', username);
+
+const db = getDbInstance();
+const analyticsRef = ref(db, `analytics/${username}`);
+get(analyticsRef).then(snapshot => {
+  console.log('Analytics data:', snapshot.val());
+});

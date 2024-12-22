@@ -8,23 +8,20 @@ interface User {
   username: string;
   totalCards: number;
   reviewedCards: number;
-  progress: number; // Added for easier sorting
+  progress: number;
 }
 
-interface Card {
-  last_review?: string;
-  due?: string;
-  // Add other card properties as needed
-}
-
-interface Word {
-  text: string;
-  card: Card;
-}
-
-interface UserData {
-  words?: {
-    [key: string]: Word;
+interface Analytics {
+  study_days: number[];
+  total_cards_reviewed: number[];
+  mastered_cards: number[];
+  daily_cards_reviewed: number[];
+  daily_session_time: number[];
+  words: {
+    [key: string]: {
+      time_used: number[];
+      difficulty: number[];
+    };
   };
 }
 
@@ -38,32 +35,27 @@ export default function DashboardPage() {
 
   const fetchUserProgress = async () => {
     setLoading(true);
-    const usersRef = ref(getDbInstance(), 'users');
-    const snapshot = await get(usersRef);
+    const analyticsRef = ref(getDbInstance(), 'analytics');
+    const snapshot = await get(analyticsRef);
 
     if (snapshot.exists()) {
-      const usersData = snapshot.val();
-      const userList: User[] = Object.entries(usersData).map(([username, data]: [string, UserData]) => {
-        const words = data.words || {};
-        const totalCards = Object.keys(words).length;
-        const reviewedCards = Object.values(words).filter(
-          (word: Word) => word.card.last_review // Card has been reviewed at least once
-        ).length;
+      const analyticsData: { [key: string]: Analytics } = snapshot.val();
+      const userList: User[] = Object.entries(analyticsData).map(([username, data]: [string, Analytics]) => {
+        const latestIndex = data.study_days.length - 1;
+        const TOTAL_AVAILABLE_WORDS = 1600;
+        const reviewedCards = data.total_cards_reviewed[latestIndex] || 0;
 
-        const progress = totalCards > 0 ? (reviewedCards / totalCards) * 100 : 0;
+        const progress = (reviewedCards / TOTAL_AVAILABLE_WORDS) * 100;
 
         return {
           username,
-          totalCards,
+          totalCards: TOTAL_AVAILABLE_WORDS,
           reviewedCards,
           progress,
         };
       });
 
-      // Sort users by progress in descending order
-      const sortedUsers = userList.sort((a, b) => b.progress - a.progress);
-
-      setUsers(sortedUsers);
+      setUsers(userList.sort((a, b) => b.progress - a.progress));
     }
     setLoading(false);
   };

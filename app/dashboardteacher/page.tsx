@@ -8,26 +8,21 @@ interface User {
   username: string;
   totalCards: number;
   reviewedCards: number;
-  progress: number; // Added for easier sorting
-  masteredCards: number; // Added for mastered cards count
+  progress: number;
+  masteredCards: number;
 }
 
-interface Card {
-  last_review?: string;
-  due?: string;
-  state?: number;
-  difficulty?: number;
-  // Add other card properties as needed
-}
-
-interface Word {
-  text: string;
-  card: Card;
-}
-
-interface UserData {
-  words?: {
-    [key: string]: Word;
+interface Analytics {
+  study_days: number[];
+  total_cards_reviewed: number[];
+  mastered_cards: number[];
+  daily_cards_reviewed: number[];
+  daily_session_time: number[];
+  words: {
+    [key: string]: {
+      time_used: number[];
+      difficulty: number[];
+    };
   };
 }
 
@@ -41,42 +36,30 @@ export default function DashboardTeacherPage() {
 
   const fetchUserProgress = async () => {
     setLoading(true);
-    const usersRef = ref(getDbInstance(), 'users');
-    const snapshot = await get(usersRef);
+    const analyticsRef = ref(getDbInstance(), 'analytics');
+    const snapshot = await get(analyticsRef);
 
     if (snapshot.exists()) {
-      const usersData = snapshot.val();
-      const userList: User[] = Object.entries(usersData).map(([username, data]: [string, UserData]) => {
-        const words = data.words || {};
-        const totalCards = Object.keys(words).length;
-        const reviewedCards = Object.values(words).filter(
-          (word: Word) => word.card.last_review // Card has been reviewed at least once
-        ).length;
-        const masteredCards = Object.values(words).filter(
-          (word: Word) => 
-            word.card.difficulty && 
-            word.card.difficulty < 5 // Only count as mastered if difficulty is less than 5
-        ).length;
-
-        const progress = totalCards > 0 ? (reviewedCards / totalCards) * 100 : 0;
+      const analyticsData: { [key: string]: Analytics } = snapshot.val();
+      const userList: User[] = Object.entries(analyticsData).map(([username, data]: [string, Analytics]) => {
+        const latestIndex = data.study_days.length - 1;
+        const TOTAL_AVAILABLE_WORDS = 1600;
+        const reviewedCards = data.total_cards_reviewed[latestIndex] || 0;
+        const masteredCards = data.mastered_cards[latestIndex] || 0;
+        
+        // Progress shows the percentage of reviewed cards that are mastered
+        const progress = reviewedCards > 0 ? (masteredCards / reviewedCards) * 100 : 0;
 
         return {
           username,
-          totalCards,
+          totalCards: TOTAL_AVAILABLE_WORDS,
           reviewedCards,
           masteredCards,
-          progress,
+          progress
         };
       });
 
-      // Sort users by mastery rate in descending order
-      const sortedUsers = userList.sort((a, b) => {
-        const aMasteryRate = a.totalCards > 0 ? (a.masteredCards / a.reviewedCards) : 0;
-        const bMasteryRate = b.totalCards > 0 ? (b.masteredCards / b.reviewedCards) : 0;
-        return bMasteryRate - aMasteryRate;
-      });
-
-      setUsers(sortedUsers);
+      setUsers(userList.sort((a, b) => b.progress - a.progress));
     }
     setLoading(false);
   };
@@ -101,7 +84,7 @@ export default function DashboardTeacherPage() {
                   {user.reviewedCards} / {user.totalCards} cards reviewed
                 </span>
                 <span className="text-sm text-gray-500">
-                  {user.masteredCards} cards mastered ({Math.round((user.masteredCards / user.reviewedCards) * 100)}%)
+                  {user.masteredCards} / {user.reviewedCards} cards mastered ({Math.round((user.masteredCards / user.reviewedCards) * 100)}%)
                 </span>
               </div>
               <div className="w-1/2">
@@ -110,7 +93,7 @@ export default function DashboardTeacherPage() {
                     className={`absolute h-full rounded-full ${
                       user.progress === 100 ? 'bg-green-500' : 'bg-blue-500'
                     } z-10`}
-                    style={{ width: `${user.progress}%` }}
+                    style={{ width: `${user.reviewedCards / user.totalCards * 100}%` }}
                   ></div>
                   <div
                     className="absolute h-full rounded-full bg-[#ffd700] z-20"
@@ -125,4 +108,4 @@ export default function DashboardTeacherPage() {
       )}
     </div>
   );
-} 
+}

@@ -1,11 +1,24 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ref, get, update } from 'firebase/database';
 import { getDbInstance } from '@/services/firebaseConfig';
 import { FSRS, Card as FSRSCard } from 'ts-fsrs';
 import audioQueue from '@/services/audioService';
-import { analyticsService } from '@/services/analyticsService';
+
+// Define interfaces for analytics service
+interface AnalyticsService {
+  startSession: () => void;
+  endSession: () => void;
+  logCardReview: (grade: string, elapsedTime: number, cardState: string) => void;
+  updateUserAnalytics: (username: string, reviewData: {
+    wordId: string;
+    timeUsed: number;
+    difficulty: number;
+    isMastered: boolean;
+  }) => Promise<void>;
+  logProblemCard: (wordId: string, text: string, againCount: number) => void;
+}
 
 // Define Grade enum values since ts-fsrs exports it only as type
 enum Grade {
@@ -44,37 +57,14 @@ const logCard = (prefix: string, { text, card }: { text: string; card: FSRSCard 
   });
 };
 
-export default function QuizPage() {
+const QuizPage = () => {
   const [word, setWord] = useState<Word | null>(null);
   const [flashColor, setFlashColor] = useState<string | null>(null);
   const [cachedWords, setCachedWords] = useState<FirebaseWordEntry | null>(null);
   const startTimeRef = useRef<Date | null>(null);
+  const analyticsRef = useRef<AnalyticsService | null>(null);
 
-  useEffect(() => {
-    analyticsService.startSession();
-    return () => {
-      analyticsService.endSession();
-    };
-  }, []);
-
-  useEffect(() => {
-    const username = localStorage.getItem('username');
-    if (username) initializeWords(username);
-    else window.location.href = '/';
-  }, []);
-
-  const initializeWords = async (username: string) => {
-    const userRef = ref(getDbInstance(), `users/${username}`);
-    const snapshot = await get(userRef);
-
-    if (snapshot.exists()) {
-      const { words }: { words: FirebaseWordEntry } = snapshot.val();
-      setCachedWords(words);
-      fetchNextWord(words);
-    }
-  };
-
-  const preloadNextWords = async (wordsData: FirebaseWordEntry, currentWord: string) => {
+  const preloadNextWords = useCallback(async (wordsData: FirebaseWordEntry, currentWord: string) => {
     const now = new Date();
     const allWords = Object.entries(wordsData)
       .map(([id, data]) => ({ id, ...data }))
@@ -99,9 +89,9 @@ export default function QuizPage() {
 
     // Clean old cache entries
     await audioQueue.clearOldCache();
-  };
+  }, []);
 
-  const fetchNextWord = async (wordsData: FirebaseWordEntry) => {
+  const fetchNextWord = useCallback(async (wordsData: FirebaseWordEntry) => {
     const now = new Date();
     
     const dueWords = Object.entries(wordsData)
@@ -130,77 +120,148 @@ export default function QuizPage() {
         await preloadNextWords(wordsData, newCards.text);
       }
     }
-  };
+  }, [preloadNextWords]);
+
+  const initializeWords = useCallback(async (username: string) => {
+    const userRef = ref(getDbInstance(), `users/${username}`);
+    const snapshot = await get(userRef);
+
+    if (snapshot.exists()) {
+      const { words }: { words: FirebaseWordEntry } = snapshot.val();
+      setCachedWords(words);
+      await fetchNextWord(words);
+    }
+  }, [fetchNextWord]);
+
+  // Load analytics service
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      if (typeof window === 'undefined') return;
+      try {
+        const { analyticsService } = await import('@/services/analyticsService');
+        analyticsRef.current = analyticsService;
+        analyticsService.startSession();
+      } catch (error) {
+        console.error('Failed to load analytics:', error);
+      }
+    };
+
+    loadAnalytics();
+
+    return () => {
+      if (analyticsRef.current) {
+        analyticsRef.current.endSession();
+      }
+    };
+  }, []);
+
+  // Initialize words
+  useEffect(() => {
+    const init = async () => {
+      if (typeof window === 'undefined') return;
+      try {
+        const username = localStorage.getItem('username');
+        if (username) {
+          await initializeWords(username);
+        } else {
+          window.location.href = '/';
+        }
+      } catch (error) {
+        console.error('Failed to initialize words:', error);
+        window.location.href = '/';
+      }
+    };
+
+    init();
+  }, [initializeWords]);
 
   const handleReview = async (grade: Grade) => {
-    if (!word || !cachedWords) return;
+    if (typeof window === 'undefined') return;
+    if (!word || !cachedWords || !analyticsRef.current) return;
 
-    const username = localStorage.getItem('username')!;
-    const now = new Date();
-    const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
-
-    // Determine grade based on response time
-    let finalGrade = grade;
-    if (grade === Grade.Good) {
-      if (elapsedTime <= 2) {
-        finalGrade = Grade.Easy;  // Under 2 seconds = Easy
-      } else if (elapsedTime > 5) {
-        finalGrade = Grade.Hard;  // Over 5 seconds = Hard
-      }
-      // Between 2-5 seconds stays Good
-    }
-
-    console.log(`Response time: ${elapsedTime.toFixed(1)}s -> Grade: ${finalGrade}`);
-
-    // Set color feedback
-    const color = {
-      [Grade.Again]: 'bg-red-100',
-      [Grade.Hard]: 'bg-orange-100',
-      [Grade.Good]: 'bg-yellow-100',
-      [Grade.Easy]: 'bg-green-100'
-    }[finalGrade];
-    
-    setFlashColor(color);
-
-    // Play audio after setting color
     try {
-      await audioQueue.play(word.text);
+      const username = localStorage.getItem('username');
+      if (!username) {
+        window.location.href = '/';
+        return;
+      }
+
+      const now = new Date();
+      const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
+
+      // Determine grade based on response time
+      let finalGrade = grade;
+      if (grade === Grade.Good) {
+        if (elapsedTime <= 2) {
+          finalGrade = Grade.Easy;  // Under 2 seconds = Easy
+        } else if (elapsedTime > 5) {
+          finalGrade = Grade.Hard;  // Over 5 seconds = Hard
+        }
+        // Between 2-5 seconds stays Good
+      }
+
+      console.log(`Response time: ${elapsedTime.toFixed(1)}s -> Grade: ${finalGrade}`);
+
+      // Set color feedback
+      const color = {
+        [Grade.Again]: 'bg-red-100',
+        [Grade.Hard]: 'bg-orange-100',
+        [Grade.Good]: 'bg-yellow-100',
+        [Grade.Easy]: 'bg-green-100'
+      }[finalGrade];
+      
+      setFlashColor(color);
+
+      // Play audio after setting color
+      try {
+        await audioQueue.play(word.text);
+      } catch (error) {
+        console.error('Error playing audio:', error);
+      }
+
+      // Rest of the function remains unchanged
+      logCard('Before review', word);
+      const updatedCard = fsrs.next(word.card, now, finalGrade as unknown as import('ts-fsrs').Grade).card;
+      logCard('After review', { text: word.text, card: updatedCard });
+
+      // Track againCount separately from FSRS card
+      const againCount = grade === Grade.Again ? ((word.againCount || 0) + 1) : 0;
+
+      // Log analytics for this review with card state
+      analyticsRef.current.logCardReview(
+        grade.toString(),
+        elapsedTime,
+        String(word.card.state)
+      );
+
+      // Update user analytics with mastery based on difficulty < 5
+      await analyticsRef.current.updateUserAnalytics(username, {
+        wordId: word.id,
+        timeUsed: elapsedTime,
+        difficulty: finalGrade,
+        isMastered: updatedCard.difficulty < 5
+      });
+
+      // Track problem cards
+      if (grade === Grade.Again) {
+        analyticsRef.current.logProblemCard(word.id, word.text, againCount);
+      }
+
+      // Update cache and Firebase
+      const updatedWords = { ...cachedWords };
+      updatedWords[word.id] = { text: word.text, card: updatedCard, againCount };
+      setCachedWords(updatedWords);
+
+      const wordRef = ref(getDbInstance(), `users/${username}/words/${word.id}`);
+      await update(wordRef, { card: updatedCard });
+
+      setTimeout(() => {
+        setFlashColor(null);
+        fetchNextWord(updatedWords);
+      }, 500);
     } catch (error) {
-      console.error('Error playing audio:', error);
+      console.error('Error handling review:', error);
     }
-
-    // Rest of the function remains unchanged
-    logCard('Before review', word);
-    const updatedCard = fsrs.next(word.card, now, finalGrade as unknown as import('ts-fsrs').Grade).card;
-    logCard('After review', { text: word.text, card: updatedCard });
-
-    // Track againCount separately from FSRS card
-    const againCount = grade === Grade.Again ? ((word.againCount || 0) + 1) : 0;
-
-    // Log analytics for this review with card state
-    analyticsService.logCardReview(
-      grade.toString(),
-      elapsedTime,
-      String(word.card.state)
-    );
-
-    // Track problem cards
-    if (grade === Grade.Again) {
-      analyticsService.logProblemCard(word.id, word.text, againCount);
-    }
-
-    // Update cache and Firebase
-    const updatedWords = { ...cachedWords };
-    updatedWords[word.id] = { text: word.text, card: updatedCard, againCount };
-    setCachedWords(updatedWords);
-
-    const wordRef = ref(getDbInstance(), `users/${username}/words/${word.id}`);
-    await update(wordRef, { card: updatedCard });
-
-    setTimeout(() => {
-      setFlashColor(null);
-      fetchNextWord(updatedWords);
-    }, 500);
   };
 
   return (
@@ -238,4 +299,6 @@ export default function QuizPage() {
       </div>
     </div>
   );
-}
+};
+
+export default QuizPage;

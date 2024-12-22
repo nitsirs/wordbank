@@ -8,7 +8,6 @@ import { createEmptyCard } from 'ts-fsrs';
 import Cookies from 'js-cookie';
 import wordList from './wordList.json'; 
 import { cleanObject } from '@/utils/cleanObject';
-import { analyticsService } from '@/services/analyticsService';
 
 interface Card {
   due?: Date;
@@ -36,6 +35,7 @@ export default function OnboardingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (typeof window === 'undefined') return;
 
     // Trim and validate username
     const trimmedUsername = username.trim();
@@ -60,14 +60,24 @@ export default function OnboardingPage() {
       }, {});
 
       await set(userRef, { words: initializedWords });
-      analyticsService.logUserSignup(trimmedUsername);
+      // Log signup after successful initialization
+      if (typeof window !== 'undefined') {
+        const { analyticsService } = await import('@/services/analyticsService');
+        analyticsService.logUserSignup(trimmedUsername);
+      }
     } else {
-      analyticsService.logUserLogin(trimmedUsername);
+      // Log login for existing users
+      if (typeof window !== 'undefined') {
+        const { analyticsService } = await import('@/services/analyticsService');
+        analyticsService.logUserLogin(trimmedUsername);
+      }
     }
 
     // Update stored username in both cookie and localStorage
     Cookies.set('username', trimmedUsername, { expires: 30 });
-    localStorage.setItem('username', trimmedUsername);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('username', trimmedUsername);
+    }
     
     router.push('/quiz');
   };
