@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ref, get } from 'firebase/database';
+import { ref, onValue } from 'firebase/database';
 import { getDbInstance } from '@/services/firebaseConfig';
 
 interface ProgressCardProps {
@@ -53,45 +53,62 @@ export default function DailyProgressPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDailyProgress();
-  }, []);
-
-  const fetchDailyProgress = async () => {
-    setLoading(true);
     const analyticsRef = ref(getDbInstance(), 'analytics');
-    const snapshot = await get(analyticsRef);
+    
+    // Set up real-time listener
+    const unsubscribe = onValue(analyticsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const analyticsData: { [key: string]: Analytics } = snapshot.val();
+        
+        // Get today's date in EST timezone
+        const now = new Date();
+        const estDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const year = estDate.getFullYear();
+        const month = String(estDate.getMonth() + 1).padStart(2, '0');
+        const day = String(estDate.getDate()).padStart(2, '0');
+        const dateKey = parseInt(`${year}${month}${day}`);
+        
+        console.log('Today date key (EST):', dateKey);
+        console.log('EST time:', estDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
 
-    if (snapshot.exists()) {
-      const analyticsData: { [key: string]: Analytics } = snapshot.val();
-      const today = new Date();
-      const dateKey = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+        const userProgress = Object.entries(analyticsData).map(([username, data]: [string, Analytics]) => {
+          let reviewedToday = 0;
+          const lastStudyDayIndex = data.study_days.lastIndexOf(dateKey);
+          if (lastStudyDayIndex !== -1) {
+            reviewedToday = data.daily_cards_reviewed[lastStudyDayIndex] || 0;
+          } else if (data.study_days.length > 0) {
+            // Check if user has studied today but the data is not in the array yet
+            const lastDate = data.study_days[data.study_days.length - 1];
+            if (lastDate === dateKey) {
+              reviewedToday = data.daily_cards_reviewed[data.daily_cards_reviewed.length - 1] || 0;
+            }
+          }
 
-      const userProgress = Object.entries(analyticsData).map(([username, data]: [string, Analytics]) => {
-        // Get today's reviewed cards from daily_cards_reviewed
-        let reviewedToday = 0;
-        const lastStudyDayIndex = data.study_days.lastIndexOf(dateKey);
-        if (lastStudyDayIndex !== -1) {
-          reviewedToday = data.daily_cards_reviewed[lastStudyDayIndex] || 0;
-        }
+          return {
+            username,
+            reviewedCards: reviewedToday,
+            totalCards: 30,
+            isCompleted: reviewedToday >= 30
+          };
+        });
 
-        return {
-          username,
-          reviewedCards: reviewedToday,
-          totalCards: 30,
-          isCompleted: reviewedToday >= 30
-        };
-      });
+        // Sort by completion status and then by number of reviewed cards
+        setUsers(userProgress.sort((a, b) => {
+          if (a.isCompleted === b.isCompleted) {
+            return b.reviewedCards - a.reviewedCards;
+          }
+          return b.isCompleted ? 1 : -1;
+        }));
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error('Error fetching analytics:', error);
+      setLoading(false);
+    });
 
-      // Sort by completion status and then by number of reviewed cards
-      setUsers(userProgress.sort((a, b) => {
-        if (a.isCompleted === b.isCompleted) {
-          return b.reviewedCards - a.reviewedCards;
-        }
-        return b.isCompleted ? 1 : -1;
-      }));
-    }
-    setLoading(false);
-  };
+    // Clean up subscription when component unmounts
+    return () => unsubscribe();
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">

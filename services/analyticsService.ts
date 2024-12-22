@@ -172,16 +172,28 @@ class AnalyticsService {
     wordId: string,
     timeUsed: number,
     difficulty: number,
-    isMastered: boolean
+    isMastered: boolean,
+    isCorrect: number
   }) {
     const db = getDbInstance();
     const analyticsRef = ref(db, `analytics/${username}`);
-    const today = parseInt(new Date().toISOString().split('T')[0].replace(/-/g, ''));
+    
+    // Get today's date in EST timezone so dailyprogress ตัดตอนเที่ยง
+    const now = new Date();
+    const estDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const year = estDate.getFullYear();
+    const month = String(estDate.getMonth() + 1).padStart(2, '0');
+    const day = String(estDate.getDate()).padStart(2, '0');
+    const today = parseInt(`${year}${month}${day}`);
+    
+    console.log('Today date key (EST):', today);
+    console.log('EST time:', estDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
 
     // Get existing analytics data
     const snapshot = await get(analyticsRef);
     
     if (!snapshot.exists()) {
+      console.log('First time user - creating new analytics');
       // First time initialization - need to calculate from user data
       const userRef = ref(db, `users/${username}/words`);
       const userSnapshot = await get(userRef);
@@ -191,14 +203,11 @@ class AnalyticsService {
         let totalCardsEncountered = 0;
         let masteredCards = 0;
         
-        // Count total unique cards encountered and mastered cards
         Object.values(words).forEach((word: any) => {
           if (word.card) {
             const hasBeenReviewed = word.card.reps !== undefined && word.card.reps > 0;
-            // Count unique cards encountered (reps > 0)
             if (hasBeenReviewed) {
               totalCardsEncountered++;
-              // Only count as mastered if the card has been reviewed AND difficulty < 5
               if (word.card.difficulty !== undefined && word.card.difficulty < 5) {
                 masteredCards++;
               }
@@ -206,43 +215,103 @@ class AnalyticsService {
           }
         });
 
-        // Initialize analytics with historical data
+        // Initialize analytics with historical data - all numeric fields as arrays
         const analytics = {
           study_days: [today],
-          total_cards_reviewed: [totalCardsEncountered + (reviewData.wordId in words ? 0 : 1)], // Only add 1 if it's a new word
-          mastered_cards: [masteredCards], // Don't add current review yet as it's included in the user data
+          total_cards_reviewed: [totalCardsEncountered + (reviewData.wordId in words ? 0 : 1)],
+          mastered_cards: [masteredCards],
           daily_cards_reviewed: [1],
           daily_session_time: [reviewData.timeUsed],
           words: {
             [reviewData.wordId]: {
               time_used: [reviewData.timeUsed],
-              difficulty: [reviewData.difficulty]
+              difficulty: [reviewData.difficulty],
+              is_correct: [reviewData.isCorrect]
             }
           }
         };
         
-        await set(analyticsRef, analytics);
+        await update(analyticsRef, analytics);
         return;
       }
     }
 
-    // Normal flow for existing analytics data
-    const analytics = snapshot.val() || {
+    // Get existing analytics or create new one
+    let analytics = snapshot.val() || {
       study_days: [today],
       total_cards_reviewed: [1],
-      mastered_cards: [0], // Start at 0 and let the recalculation handle it
+      mastered_cards: [0],
       daily_cards_reviewed: [1],
       daily_session_time: [reviewData.timeUsed],
       words: {
         [reviewData.wordId]: {
           time_used: [reviewData.timeUsed],
-          difficulty: [reviewData.difficulty]
+          difficulty: [reviewData.difficulty],
+          is_correct: [reviewData.isCorrect]
         }
       }
     };
 
-    if (analytics.study_days[analytics.study_days.length - 1] !== today) {
-      // New day
+    // Convert all numeric collections to arrays if they're objects
+    const arrayFields = ['study_days', 'total_cards_reviewed', 'mastered_cards', 'daily_cards_reviewed', 'daily_session_time'];
+    arrayFields.forEach(field => {
+      if (analytics[field] && !Array.isArray(analytics[field])) {
+        console.log(`Converting ${field} to array:`, analytics[field]);
+        analytics[field] = Object.values(analytics[field]);
+      }
+    });
+
+    // Also ensure word-specific arrays are arrays
+    Object.keys(analytics.words).forEach(wordId => {
+      const word = analytics.words[wordId];
+      if (word.time_used && !Array.isArray(word.time_used)) {
+        word.time_used = Object.values(word.time_used);
+      }
+      if (word.difficulty && !Array.isArray(word.difficulty)) {
+        word.difficulty = Object.values(word.difficulty);
+      }
+      if (word.is_correct && !Array.isArray(word.is_correct)) {
+        word.is_correct = Object.values(word.is_correct);
+      }
+      if (!word.is_correct) {
+        word.is_correct = word.difficulty.map((grade: number) => grade === 1 ? 0 : 1);  // 1 is Grade.Again
+      }
+    });
+
+    // Find the correct day index
+    const todayIndex = analytics.study_days.indexOf(today);
+    const lastStudyDay = analytics.study_days[analytics.study_days.length - 1];
+    
+    console.log('Current analytics state:', {
+      study_days: analytics.study_days,
+      today,
+      todayIndex,
+      lastStudyDay,
+      daily_cards_reviewed: analytics.daily_cards_reviewed
+    });
+
+    if (todayIndex === -1) {
+      console.log('New study day detected');
+      // Today is a new study day
+      // Calculate how many days we need to fill with zeros
+      const daysToFill = lastStudyDay < today ? 
+        Math.floor((today - lastStudyDay) / 10000) - 1 : 0;
+      
+      console.log('Days to fill:', daysToFill);
+
+      // Fill gaps with zeros if there are missing days
+      for (let i = 0; i < daysToFill; i++) {
+        const gapDay = lastStudyDay + ((i + 1) * 10000);
+        console.log('Adding gap day:', gapDay);
+        analytics.study_days.push(gapDay);
+        analytics.daily_cards_reviewed.push(0);
+        analytics.daily_session_time.push(0);
+        analytics.total_cards_reviewed.push(analytics.total_cards_reviewed[analytics.total_cards_reviewed.length - 1]);
+        analytics.mastered_cards.push(analytics.mastered_cards[analytics.mastered_cards.length - 1]);
+      }
+
+      // Add today's initial data
+      console.log('Adding today\'s data at new index');
       analytics.study_days.push(today);
       analytics.daily_cards_reviewed.push(1);
       analytics.daily_session_time.push(reviewData.timeUsed);
@@ -260,7 +329,6 @@ class AnalyticsService {
             const hasBeenReviewed = word.card.reps !== undefined && word.card.reps > 0;
             if (hasBeenReviewed) {
               currentTotalCards++;
-              // Only count as mastered if the card has been reviewed AND difficulty < 5
               if (word.card.difficulty !== undefined && word.card.difficulty < 5) {
                 currentMasteredCards++;
               }
@@ -271,10 +339,10 @@ class AnalyticsService {
       analytics.total_cards_reviewed.push(currentTotalCards);
       analytics.mastered_cards.push(currentMasteredCards);
     } else {
-      // Same day - update the last values
-      const lastIndex = analytics.study_days.length - 1;
-      analytics.daily_cards_reviewed[lastIndex]++;
-      analytics.daily_session_time[lastIndex] += reviewData.timeUsed;
+      console.log('Updating existing day at index:', todayIndex);
+      // Update today's data
+      analytics.daily_cards_reviewed[todayIndex] = (analytics.daily_cards_reviewed[todayIndex] || 0) + 1;
+      analytics.daily_session_time[todayIndex] = (analytics.daily_session_time[todayIndex] || 0) + reviewData.timeUsed;
       
       // Get current total cards reviewed and mastered cards
       const userRef = ref(db, `users/${username}/words`);
@@ -289,30 +357,47 @@ class AnalyticsService {
             const hasBeenReviewed = word.card.reps !== undefined && word.card.reps > 0;
             if (hasBeenReviewed) {
               currentTotalCards++;
-              // Only count as mastered if the card has been reviewed AND difficulty < 5
               if (word.card.difficulty !== undefined && word.card.difficulty < 5) {
                 currentMasteredCards++;
               }
             }
           }
         });
-        analytics.total_cards_reviewed[lastIndex] = currentTotalCards;
-        analytics.mastered_cards[lastIndex] = currentMasteredCards;
+        analytics.total_cards_reviewed[todayIndex] = currentTotalCards;
+        analytics.mastered_cards[todayIndex] = currentMasteredCards;
       }
     }
 
-    // Update word-specific stats
+    // Update word-specific stats - ensure arrays
     if (!analytics.words[reviewData.wordId]) {
       analytics.words[reviewData.wordId] = {
         time_used: [reviewData.timeUsed],
-        difficulty: [reviewData.difficulty]
+        difficulty: [reviewData.difficulty],
+        is_correct: [reviewData.isCorrect]
       };
     } else {
-      analytics.words[reviewData.wordId].time_used.push(reviewData.timeUsed);
-      analytics.words[reviewData.wordId].difficulty.push(reviewData.difficulty);
+      const word = analytics.words[reviewData.wordId];
+      if (!Array.isArray(word.time_used)) {
+        word.time_used = Object.values(word.time_used);
+      }
+      if (!Array.isArray(word.difficulty)) {
+        word.difficulty = Object.values(word.difficulty);
+      }
+      if (!Array.isArray(word.is_correct)) {
+        word.is_correct = Object.values(word.is_correct);
+      }
+      word.time_used.push(reviewData.timeUsed);
+      word.difficulty.push(reviewData.difficulty);
+      word.is_correct.push(reviewData.isCorrect);
     }
 
-    await set(analyticsRef, analytics);
+    console.log('Final analytics state before update:', {
+      study_days: analytics.study_days,
+      daily_cards_reviewed: analytics.daily_cards_reviewed,
+      daily_session_time: analytics.daily_session_time
+    });
+
+    await update(analyticsRef, analytics);
   }
 }
 

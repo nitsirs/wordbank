@@ -16,6 +16,7 @@ interface AnalyticsService {
     timeUsed: number;
     difficulty: number;
     isMastered: boolean;
+    isCorrect: number;
   }) => Promise<void>;
   logProblemCard: (wordId: string, text: string, againCount: number) => void;
 }
@@ -239,7 +240,8 @@ const QuizPage = () => {
         wordId: word.id,
         timeUsed: elapsedTime,
         difficulty: finalGrade,
-        isMastered: updatedCard.difficulty < 5
+        isMastered: updatedCard.difficulty < 5,
+        isCorrect: finalGrade === Grade.Again ? 0 : 1  // 0 for Again (incorrect), 1 for all other grades (correct)
       });
 
       // Track problem cards
