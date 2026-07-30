@@ -6,6 +6,7 @@ import { ColoredWord } from '@/components/ColoredWord';
 import audioQueue from '@/services/audioService';
 import { fetchPracticeProgress, submitPracticeReview, GRADE } from '@/services/db';
 import { pickNext, type FluencyWord, type FluencyStats } from '@/lib/fluency';
+import { buildDict, matchWord } from '@/lib/thaiSegment';
 import type * as SpeechSdk from 'microsoft-cognitiveservices-speech-sdk';
 import styles from './p1.module.css';
 
@@ -40,24 +41,7 @@ export default function P1PracticePage() {
   const dictRef = useRef<string[]>([]);
   const handleReviewRef = useRef<(correct: boolean) => void>(() => {});
 
-  const norm = (s: string) => (s || '').replace(/[\s\p{P}]/gu, '');
-
-  // dictionary-constrained longest-match tokenizer (dict = p1 word pool).
-  // Longest-match picks ตาก over ตา, killing nesting false-fires.
-  const segment = (stream: string, dict: string[]): string[] => {
-    const out: string[] = [];
-    let i = 0;
-    while (i < stream.length) {
-      const hit = dict.find((w) => w.length > 0 && stream.startsWith(w, i));
-      if (hit) {
-        out.push(hit);
-        i += hit.length;
-      } else {
-        i++;
-      }
-    }
-    return out;
-  };
+  // norm + dictionary-constrained matching live in lib/thaiSegment (unit-tested).
 
   const buildQueue = (pool: FluencyWord[], excludeId: number | null, n: number): FluencyWord[] => {
     const out: FluencyWord[] = [];
@@ -103,9 +87,7 @@ export default function P1PracticePage() {
 
   // keep the segmenter dictionary fresh
   useEffect(() => {
-    const set = new Set<string>();
-    words.forEach((w) => set.add(norm(w.text)));
-    dictRef.current = [...set].sort((a, b) => b.length - a.length);
+    dictRef.current = buildDict(words.map((w) => w.text));
   }, [words]);
 
   // stop the recognizer if the page unmounts
@@ -195,10 +177,11 @@ export default function P1PracticePage() {
 
       recognizer.recognized = (_s, evt) => {
         if (evt.result.reason !== sdk.ResultReason.RecognizedSpeech) return;
-        const tokens = segment(norm(evt.result.text), dictRef.current);
         const cur = currentRef.current;
-        if (cur && tokens.includes(norm(cur.text))) {
-          handleReviewRef.current(true); // auto-tick ✔ + advance
+        if (!cur) return;
+        const { matched } = matchWord(evt.result.text, cur.text, dictRef.current);
+        if (matched) {
+          handleReviewRef.current(true); // auto-tick ✔ + advance (exact or fuzzy)
         }
       };
       recognizer.canceled = (_s, evt) => {
