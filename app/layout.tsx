@@ -8,8 +8,9 @@ const sarabun = Sarabun({
 })
 
 export const metadata = {
-  title: 'Thai Reading Practice',
-  description: 'Interactive Thai reading practice application',
+  title: 'บัญชีคำ',
+  description: 'แบบฝึกอ่านออกเสียงและสะกดคำ สำหรับนักเรียนชั้น ป.1',
+  metadataBase: new URL('https://arnork.com'),
 }
 
 export default function RootLayout({
