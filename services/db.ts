@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { FSRS, createEmptyCard, State, type Card, type Grade } from 'ts-fsrs';
+import type { FluencyWord, FluencyStats } from '@/lib/fluency';
 
 // Grades (matches ts-fsrs Grade values)
 export const GRADE = { Again: 1, Hard: 2, Good: 3, Easy: 4 } as const;
@@ -133,6 +134,117 @@ export async function getMyDailyStats(days = 30) {
   const { data, error } = await supabase.rpc('my_daily_stats', { days_back: days });
   if (error) throw error;
   return (data ?? []) as { day: string; cards: number; seconds: number; correct: number }[];
+}
+
+// ----------------------------------------------------------------------------
+// /practice/p1 — production mode (fluency engine). FSRS is a side input here;
+// the client-side fluency engine (lib/fluency.ts) drives word selection.
+// ----------------------------------------------------------------------------
+
+export interface PracticeProgressRow {
+  id: number;
+  text: string;
+  segments: { char: string; color: string }[] | null;
+  reps: number;
+  recent_accuracy: number | null;
+  avg_speed: number | null;
+  last_review: string | null;
+}
+
+function rowToFluencyWord(r: PracticeProgressRow): FluencyWord {
+  const stats: FluencyStats = {
+    reps: r.reps ?? 0,
+    recentAccuracy: r.recent_accuracy,
+    avgSpeed: r.avg_speed,
+    lastReviewMs: r.last_review ? new Date(r.last_review).getTime() : null,
+  };
+  return { id: r.id, text: r.text, segments: r.segments, stats };
+}
+
+/** Load the full p1 pool for the signed-in student, each enriched with fluency stats. */
+export async function fetchPracticeProgress(): Promise<FluencyWord[]> {
+  await ensureSession();
+  const { data, error } = await supabase.rpc('practice_progress');
+  if (error) throw error;
+  return ((data ?? []) as PracticeProgressRow[]).map(rowToFluencyWord);
+}
+
+/** Rebuild a ts-fsrs Card from an existing student_cards row, or start fresh. */
+async function loadCard(
+  uid: string,
+  wordId: number
+): Promise<{ card: Card; againCount: number }> {
+  const { data } = await supabase
+    .from('student_cards')
+    .select(
+      'due,stability,difficulty,elapsed_days,scheduled_days,reps,lapses,state,last_review,again_count'
+    )
+    .eq('student_id', uid)
+    .eq('word_id', wordId)
+    .maybeSingle();
+
+  const card = createEmptyCard();
+  let againCount = 0;
+  if (data) {
+    card.due = data.due ? new Date(data.due) : new Date();
+    card.stability = data.stability ?? 0;
+    card.difficulty = data.difficulty ?? 0;
+    card.elapsed_days = data.elapsed_days ?? 0;
+    card.scheduled_days = data.scheduled_days ?? 0;
+    card.reps = data.reps ?? 0;
+    card.lapses = data.lapses ?? 0;
+    card.state = STATE_NUM[data.state] ?? State.New;
+    card.last_review = data.last_review ? new Date(data.last_review) : new Date();
+    againCount = data.again_count ?? 0;
+  }
+  return { card, againCount };
+}
+
+/**
+ * Record a production review: advance the FSRS card (side input, maintenance tail)
+ * and append a review_event tagged mode='production' + used_audio. The client-side
+ * fluency engine — not the returned card — picks the next word.
+ */
+export async function submitPracticeReview(
+  wordId: number,
+  grade: Grade,
+  elapsedSec: number,
+  usedAudio: boolean
+): Promise<void> {
+  const uid = await ensureSession();
+  const now = new Date();
+
+  const { card, againCount } = await loadCard(uid, wordId);
+  const next = fsrs.next(card, now, grade).card;
+
+  const { error: upErr } = await supabase.from('student_cards').upsert(
+    {
+      student_id: uid,
+      word_id: wordId,
+      due: next.due,
+      stability: next.stability,
+      difficulty: next.difficulty,
+      elapsed_days: next.elapsed_days,
+      scheduled_days: next.scheduled_days,
+      reps: next.reps,
+      lapses: next.lapses,
+      state: STATE_NAME[next.state],
+      last_review: next.last_review ?? now,
+      again_count: grade === GRADE.Again ? againCount + 1 : 0,
+    },
+    { onConflict: 'student_id,word_id' }
+  );
+  if (upErr) throw upErr;
+
+  const { error: evErr } = await supabase.from('review_events').insert({
+    student_id: uid,
+    word_id: wordId,
+    grade,
+    elapsed_sec: elapsedSec,
+    mode: 'production',
+    used_audio: usedAudio,
+  });
+  if (evErr) throw evErr;
 }
 
 // NOTE: class_progress RPC is now gated behind the /api/class-progress route
