@@ -5,11 +5,13 @@ class AzureSpeechService {
   private synthesizer: sdk.SpeechSynthesizer;
 
   constructor() {
-    // Initialize with Azure Speech Service key and region
-    this.speechConfig = sdk.SpeechConfig.fromSubscription(
-      '8Pf36xf8HDbmSEDR4SG23bt8i2ldSBT2gaB0aicQVvkEGmMJT0PhJQQJ99ALACqBBLyXJ3w3AAAYACOGWjCe',
-      'eastus'
-    );
+    // Key + region from env (was hardcoded w/ a dead key + wrong region; moved out 2026-07-30).
+    const speechKey = process.env.AZURE_SPEECH_KEY;
+    const speechRegion = process.env.AZURE_SPEECH_REGION;
+    if (!speechKey || !speechRegion) {
+      throw new Error('Azure Speech env vars missing: set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION.');
+    }
+    this.speechConfig = sdk.SpeechConfig.fromSubscription(speechKey, speechRegion);
     
     // Set speech synthesis language and voice
     this.speechConfig.speechSynthesisLanguage = 'th-TH';
