@@ -135,15 +135,5 @@ export async function getMyDailyStats(days = 30) {
   return (data ?? []) as { day: string; cards: number; seconds: number; correct: number }[];
 }
 
-/** Class-wide per-student progress (teacher dashboards). */
-export interface ClassRow {
-  username: string;
-  reviewed_total: number;
-  mastered_total: number;
-  reviewed_today: number;
-}
-export async function getClassProgress(): Promise<ClassRow[]> {
-  const { data, error } = await supabase.rpc('class_progress');
-  if (error) throw error;
-  return (data ?? []) as ClassRow[];
-}
+// NOTE: class_progress RPC is now gated behind the /api/class-progress route
+// (teacher PIN + service-role key). It is no longer called from the client.
