@@ -5,6 +5,7 @@ import { ref, get, update } from 'firebase/database';
 import { getDbInstance } from '@/services/firebaseConfig';
 import { FSRS, Card as FSRSCard } from 'ts-fsrs';
 import audioQueue from '@/services/audioService';
+import { ColoredWord } from '@/components/ColoredWord';
 
 // Define interfaces for analytics service
 interface AnalyticsService {
@@ -271,13 +272,17 @@ const QuizPage = () => {
       <div className="max-w-md w-full relative p-6">
         {word ? (
           <div className="flex flex-col items-center gap-8 bg-white shadow-lg rounded-lg p-10">
-            {/* Rotated Word */}
-            <div className="absolute top-0 transform -translate-y-20 rotate-180 text-black-300">
-              <h1 className="text-6xl font-bold text-center">{word.text}</h1>
+            {/* Rotated Word (upside-down, for the person across the table) */}
+            <div className="absolute top-0 transform -translate-y-20 rotate-180">
+              <h1 className="text-6xl font-bold text-center">
+                <ColoredWord text={word.text} />
+              </h1>
             </div>
 
             {/* Main Word Display */}
-            <h1 className="text-6xl font-bold text-center">{word.text}</h1>
+            <h1 className="text-6xl font-bold text-center">
+              <ColoredWord text={word.text} />
+            </h1>
 
             {/* Buttons */}
             <div className="flex gap-4 w-full justify-center">

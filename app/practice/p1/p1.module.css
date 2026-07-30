@@ -1,0 +1,61 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.card {
+  min-height: 84px;
+  padding: 12px 10px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.cell {
+  cursor: pointer;
+  transition: transform 0.05s ease;
+}
+.cell:active {
+  transform: scale(0.97);
+}
+.cell:active .card {
+  background: #f1f1f4;
+}
+
+.index {
+  font-size: 14pt;
+  font-weight: 400;
+  color: #9aa0a6;
+}
+
+.word {
+  font-size: 30pt;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+.pager button {
+  background: #35389d;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 16px;
+  cursor: pointer;
+}
+.pager button:disabled {
+  background: #c7c9e0;
+  cursor: not-allowed;
+}
+.pager span {
+  color: #555;
+  font-size: 14px;
+}
