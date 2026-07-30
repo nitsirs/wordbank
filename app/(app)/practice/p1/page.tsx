@@ -6,33 +6,49 @@ import { ColoredWord } from '@/components/ColoredWord';
 import audioQueue from '@/services/audioService';
 import { fetchPracticeProgress, submitPracticeReview, GRADE } from '@/services/db';
 import { pickNext, type FluencyWord, type FluencyStats } from '@/lib/fluency';
-import styles from './p1.module.css';
 
 /**
  * บัญชีคำ ป.1 — อ่านออกเสียง (production mode).
  *
- * The kid reads each word aloud; the adult across the table ticks ✔/✖. The
- * client-side fluency engine (lib/fluency.ts) picks each next word to land near
+ * Layout (2026-07-30 redesign):
+ * - Kid zone: the current word is FIXED + centered (no scroll drum that hides it),
+ *   with the next word faded below as a "ต่อไป" peek so the kid can read ahead fast.
+ * - Parent/teacher bar: a compact horizontal slide of the upcoming queue, pinned to
+ *   the bottom, current word bolded.
+ *
+ * The client-side fluency engine (lib/fluency.ts) picks each next word to land near
  * the ~80% success zone, weighted toward the weak band with a steady drip of new
- * words. Colors come from word_bank.segments (curated ครูกาญ 4-color). FSRS runs
- * only as a maintenance side input (services/db.ts submitPracticeReview).
+ * words. Colors from word_bank.segments (ครูกาญ 4-color). FSRS runs only as a
+ * maintenance side input (services/db.ts submitPracticeReview).
  */
 export default function P1PracticePage() {
   const [words, setWords] = useState<FluencyWord[]>([]);
-  const [stack, setStack] = useState<FluencyWord[]>([]); // shown history; last = current
+  const [seen, setSeen] = useState(0); // words completed
+  const [current, setCurrent] = useState<FluencyWord | null>(null);
+  const [queue, setQueue] = useState<FluencyWord[]>([]); // upcoming preview (excl. current)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [usedAudio, setUsedAudio] = useState(false);
 
-  const drumRef = useRef<HTMLDivElement>(null);
-  const currentSlotRef = useRef<HTMLDivElement>(null);
   const startTimeRef = useRef<number | null>(null);
   const busyRef = useRef(false);
 
-  // current = last shown word
-  const current = stack.length ? stack[stack.length - 1] : null;
+  // Best-effort preview of the next N words (excluding excludeId), for the
+  // kid's "ต่อไป" peek and the teacher's upcoming-queue strip. Real next pick
+  // still depends on each grade; this is a planning preview only.
+  const buildQueue = (pool: FluencyWord[], excludeId: number | null, n: number): FluencyWord[] => {
+    const out: FluencyWord[] = [];
+    const excl = new Set<number>(excludeId != null ? [excludeId] : []);
+    for (let i = 0; i < n; i++) {
+      const w = pickNext(pool.filter((x) => !excl.has(x.id)));
+      if (!w) break;
+      out.push(w);
+      excl.add(w.id);
+    }
+    return out;
+  };
 
-  // load the p1 pool once, pick the first word
+  // load the p1 pool once, pick the first word + initial queue
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -46,7 +62,8 @@ export default function P1PracticePage() {
         setWords(pool);
         const first = pickNext(pool);
         if (first) {
-          setStack([first]);
+          setCurrent(first);
+          setQueue(buildQueue(pool, first.id, 6));
           startTimeRef.current = Date.now();
           audioQueue.preload(first.text).catch(() => {});
         }
@@ -62,10 +79,7 @@ export default function P1PracticePage() {
     };
   }, []);
 
-  // center the current slot whenever the stack grows → the drum slide
-  useEffect(() => {
-    currentSlotRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [stack.length]);
+  const next = queue[0] ?? null; // kid "ต่อไป" peek
 
   const playAudio = async () => {
     if (!current) return;
@@ -103,17 +117,19 @@ export default function P1PracticePage() {
 
     // fire-and-forget the DB write (FSRS side input + production review_event)
     submitPracticeReview(current.id, grade, elapsed, usedAudio).catch((e) =>
-      console.error('submit failed:', e)
+      console.error('submit failed:', e),
     );
 
-    const next = pickNext(updated, { excludeId: current.id });
-    if (next) {
-      setStack((s) => [...s, next]);
+    // advance to the next word; rebuild the preview queue
+    const upcoming = pickNext(updated, { excludeId: current.id });
+    if (upcoming) {
+      setCurrent(upcoming);
+      setQueue(buildQueue(updated, upcoming.id, 6));
       setUsedAudio(false);
       startTimeRef.current = Date.now();
-      audioQueue.preload(next.text).catch(() => {});
+      audioQueue.preload(upcoming.text).catch(() => {});
     }
-
+    setSeen((s) => s + 1);
     window.setTimeout(() => {
       busyRef.current = false;
     }, 350);
@@ -136,46 +152,41 @@ export default function P1PracticePage() {
   }
 
   return (
-    <main className="relative min-h-screen bg-[#F5F6F8] flex flex-col items-center pb-8">
-      {/* adult view across the table: the current word, rotated 180° */}
-      {current && (
-        <div className="w-full flex justify-center pt-3">
-          <div className="rotate-180 text-3xl font-bold text-[#35389D]">
-            <ColoredWord segments={current.segments ?? undefined} text={current.text} />
-          </div>
-        </div>
-      )}
-
-      <header className="text-center my-2">
-        <h1 className="text-xl font-bold text-[#35389D]">บัญชีคำ ป.1 — อ่านออกเสียง</h1>
-        <p className="text-gray-500 text-sm">ให้ลูกอ่านเสียงดัง • ผู้ใหญ่กด ✔ หรือ ✖</p>
+    <main className="relative min-h-screen bg-[#F5F6F8] flex flex-col">
+      {/* compact title */}
+      <header className="text-center pt-3 pb-1 shrink-0">
+        <h1 className="text-sm font-semibold text-[#35389D]">บัญชีคำ ป.1 — อ่านออกเสียง</h1>
       </header>
 
-      {/* kid view: the drum */}
-      <div className={styles.drum} ref={drumRef}>
-        {stack.map((w, i) => (
-          <div
-            key={`${w.id}-${i}`}
-            ref={i === stack.length - 1 ? currentSlotRef : undefined}
-            className={styles.slot}
-          >
-            <h2 className="text-6xl font-bold text-center px-4">
-              <ColoredWord segments={w.segments ?? undefined} text={w.text} />
+      {/* KID zone — current word FIXED + centered; next word faded peek (read ahead) */}
+      <section className="flex-1 flex flex-col items-center justify-center px-4 select-none overflow-hidden">
+        {current && (
+          <>
+            <h2 className="text-7xl font-bold text-center leading-tight">
+              <ColoredWord segments={current.segments ?? undefined} text={current.text} />
             </h2>
-          </div>
-        ))}
-      </div>
+            {next && (
+              <div className="mt-8 flex flex-col items-center opacity-25">
+                <span className="text-2xl font-semibold text-gray-600">
+                  <ColoredWord segments={next.segments ?? undefined} text={next.text} />
+                </span>
+                <span className="text-[11px] tracking-widest text-gray-400 mt-1">ต่อไป</span>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       {/* controls */}
-      <div className="mt-3 flex flex-col items-center gap-4 w-full max-w-md px-4">
+      <div className="flex flex-col items-center gap-3 w-full max-w-md mx-auto px-4 pb-3 shrink-0">
         <button
           onClick={playAudio}
           disabled={!current}
-          className={`flex items-center gap-2 px-5 py-2 rounded-full text-white font-medium transition-colors ${
+          className={`flex items-center gap-2 px-5 py-2 rounded-full text-white text-sm font-medium transition-colors ${
             usedAudio ? 'bg-[#35389D]' : 'bg-gray-400 hover:bg-gray-500'
           } disabled:opacity-50`}
         >
-          <Volume2 className="w-5 h-5" />
+          <Volume2 className="w-4 h-4" />
           ฟังเสียง
         </button>
 
@@ -183,7 +194,7 @@ export default function P1PracticePage() {
           <button
             onClick={() => handleReview(false)}
             disabled={!current}
-            className="bg-red-500 text-white py-5 rounded-2xl text-4xl w-1/2 hover:bg-red-600 active:scale-95 transition disabled:opacity-50"
+            className="bg-red-500 text-white py-4 rounded-2xl text-3xl w-1/2 hover:bg-red-600 active:scale-95 transition disabled:opacity-50"
             aria-label="อ่านไม่ได้"
           >
             ✖
@@ -191,15 +202,32 @@ export default function P1PracticePage() {
           <button
             onClick={() => handleReview(true)}
             disabled={!current}
-            className="bg-green-500 text-white py-5 rounded-2xl text-4xl w-1/2 hover:bg-green-600 active:scale-95 transition disabled:opacity-50"
+            className="bg-green-500 text-white py-4 rounded-2xl text-3xl w-1/2 hover:bg-green-600 active:scale-95 transition disabled:opacity-50"
             aria-label="อ่านได้"
           >
             ✔
           </button>
         </div>
 
-        <p className="text-gray-500 text-sm">อ่านแล้ว {Math.max(0, stack.length - 1)} คำ</p>
+        <p className="text-gray-400 text-xs">อ่านแล้ว {seen} คำ</p>
       </div>
+
+      {/* PARENT/TEACHER bar — pinned bottom, compact horizontal slide of the queue */}
+      <footer className="border-t border-gray-200 bg-white shrink-0">
+        <div className="flex items-center gap-3 overflow-x-auto px-3 py-2 text-sm whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {current && (
+            <span className="font-bold text-[#35389D] underline underline-offset-2">
+              {current.text}
+            </span>
+          )}
+          <span className="text-gray-300">›</span>
+          {queue.map((w, i) => (
+            <span key={`${w.id}-${i}`} className="text-gray-400">
+              {w.text}
+            </span>
+          ))}
+        </div>
+      </footer>
     </main>
   );
 }
