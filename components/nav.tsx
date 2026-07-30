@@ -9,6 +9,7 @@ const LINKS = [
   { href: '/', label: 'หน้าแรก' },
   { href: '/quiz', label: 'ทบทวน' },
   { href: '/practice/p1', label: 'ฝึกคำ' },
+  { href: '/leaderboard', label: 'อันดับ' },
   { href: '/instructions', label: 'วิธีเล่น' },
 ];
 
