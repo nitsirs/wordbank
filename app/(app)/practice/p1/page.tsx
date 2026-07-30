@@ -6,6 +6,7 @@ import { ColoredWord } from '@/components/ColoredWord';
 import audioQueue from '@/services/audioService';
 import { fetchPracticeProgress, submitPracticeReview, GRADE } from '@/services/db';
 import { pickNext, type FluencyWord, type FluencyStats } from '@/lib/fluency';
+import styles from './p1.module.css';
 
 /**
  * บัญชีคำ ป.1 — อ่านออกเสียง (production mode).
@@ -152,17 +153,18 @@ export default function P1PracticePage() {
   }
 
   return (
-    <main className="relative min-h-screen bg-[#F5F6F8] flex flex-col">
+    <main className="relative h-[100dvh] overflow-hidden bg-[#F5F6F8] flex flex-col">
       {/* compact title */}
       <header className="text-center pt-3 pb-1 shrink-0">
         <h1 className="text-sm font-semibold text-[#35389D]">บัญชีคำ ป.1 — อ่านออกเสียง</h1>
       </header>
 
-      {/* KID zone — current word FIXED + centered; next word faded peek (read ahead) */}
-      <section className="flex-1 flex flex-col items-center justify-center px-4 select-none overflow-hidden">
+      {/* KID zone — current word FIXED + centered, flipped 180° for the kid across
+          the table; rolls in smoothly on each advance. Next word faded peek. */}
+      <section className="flex-1 min-h-0 flex items-center justify-center px-4 overflow-hidden">
         {current && (
-          <>
-            <h2 className="text-7xl font-bold text-center leading-tight">
+          <div className="rotate-180 flex flex-col items-center select-none">
+            <h2 key={current.id} className={`text-7xl font-bold text-center leading-tight ${styles.roll}`}>
               <ColoredWord segments={current.segments ?? undefined} text={current.text} />
             </h2>
             {next && (
@@ -173,7 +175,7 @@ export default function P1PracticePage() {
                 <span className="text-[11px] tracking-widest text-gray-400 mt-1">ต่อไป</span>
               </div>
             )}
-          </>
+          </div>
         )}
       </section>
 
@@ -194,7 +196,7 @@ export default function P1PracticePage() {
           <button
             onClick={() => handleReview(false)}
             disabled={!current}
-            className="bg-red-500 text-white py-4 rounded-2xl text-3xl w-1/2 hover:bg-red-600 active:scale-95 transition disabled:opacity-50"
+            className="bg-red-500 text-white py-4 rounded-2xl text-3xl w-1/2 hover:bg-red-600 disabled:opacity-50"
             aria-label="อ่านไม่ได้"
           >
             ✖
@@ -202,7 +204,7 @@ export default function P1PracticePage() {
           <button
             onClick={() => handleReview(true)}
             disabled={!current}
-            className="bg-green-500 text-white py-4 rounded-2xl text-3xl w-1/2 hover:bg-green-600 active:scale-95 transition disabled:opacity-50"
+            className="bg-green-500 text-white py-4 rounded-2xl text-3xl w-1/2 hover:bg-green-600 disabled:opacity-50"
             aria-label="อ่านได้"
           >
             ✔
