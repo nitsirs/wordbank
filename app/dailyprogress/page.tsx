@@ -1,48 +1,26 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { ref, onValue } from 'firebase/database';
-import { getDbInstance } from '@/services/firebaseConfig';
+import { useState, useEffect, useCallback } from 'react';
+import { getClassProgress } from '@/services/db';
+
+const DAILY_GOAL = 30;
 
 interface ProgressCardProps {
   username: string;
   reviewedCards: number;
-  totalCards?: number;
-  isCompleted?: boolean;
+  isCompleted: boolean;
 }
 
-interface Analytics {
-  study_days: number[];
-  total_cards_reviewed: number[];
-  mastered_cards: number[];
-  daily_cards_reviewed: number[];
-  daily_session_time: number[];
-  words: {
-    [key: string]: {
-      time_used: number[];
-      difficulty: number[];
-    };
-  };
-}
-
-function ProgressCard({ username, reviewedCards, totalCards = 30, isCompleted }: ProgressCardProps) {
-  const progress = Math.min((reviewedCards / totalCards) * 100, 100);
-  
+function ProgressCard({ username, reviewedCards, isCompleted }: ProgressCardProps) {
+  const progress = Math.min((reviewedCards / DAILY_GOAL) * 100, 100);
   return (
-    <div className={`p-4 rounded-xl transition-colors ${
-      isCompleted ? 'bg-yellow-100' : 'bg-white'
-    } shadow-sm hover:shadow-md`}>
+    <div className={`p-4 rounded-xl transition-colors ${isCompleted ? 'bg-yellow-100' : 'bg-white'} shadow-sm hover:shadow-md`}>
       <div className="text-center mb-3">
         <h3 className="font-medium text-gray-800">{username}</h3>
-        <p className="text-sm text-gray-500">{reviewedCards}/{totalCards}</p>
+        <p className="text-sm text-gray-500">{reviewedCards}/{DAILY_GOAL}</p>
       </div>
       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div 
-          className={`h-full transition-all ${
-            isCompleted ? 'bg-yellow-400' : 'bg-blue-500'
-          }`}
-          style={{ width: `${progress}%` }}
-        />
+        <div className={`h-full transition-all ${isCompleted ? 'bg-yellow-400' : 'bg-blue-500'}`} style={{ width: `${progress}%` }} />
       </div>
     </div>
   );
@@ -52,81 +30,40 @@ export default function DailyProgressPage() {
   const [users, setUsers] = useState<ProgressCardProps[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const analyticsRef = ref(getDbInstance(), 'analytics');
-    
-    // Set up real-time listener
-    const unsubscribe = onValue(analyticsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const analyticsData: { [key: string]: Analytics } = snapshot.val();
-        
-        // Get today's date in EST timezone
-        const now = new Date();
-        const estDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const year = estDate.getFullYear();
-        const month = String(estDate.getMonth() + 1).padStart(2, '0');
-        const day = String(estDate.getDate()).padStart(2, '0');
-        const dateKey = parseInt(`${year}${month}${day}`);
-        
-        console.log('Today date key (EST):', dateKey);
-        console.log('EST time:', estDate.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-
-        const userProgress = Object.entries(analyticsData).map(([username, data]: [string, Analytics]) => {
-          let reviewedToday = 0;
-          const lastStudyDayIndex = data.study_days.lastIndexOf(dateKey);
-          if (lastStudyDayIndex !== -1) {
-            reviewedToday = data.daily_cards_reviewed[lastStudyDayIndex] || 0;
-          } else if (data.study_days.length > 0) {
-            // Check if user has studied today but the data is not in the array yet
-            const lastDate = data.study_days[data.study_days.length - 1];
-            if (lastDate === dateKey) {
-              reviewedToday = data.daily_cards_reviewed[data.daily_cards_reviewed.length - 1] || 0;
-            }
-          }
-
-          return {
-            username,
-            reviewedCards: reviewedToday,
-            totalCards: 30,
-            isCompleted: reviewedToday >= 30
-          };
-        });
-
-        // Sort by completion status and then by number of reviewed cards
-        setUsers(userProgress.sort((a, b) => {
-          if (a.isCompleted === b.isCompleted) {
-            return b.reviewedCards - a.reviewedCards;
-          }
-          return b.isCompleted ? 1 : -1;
-        }));
-      }
-      setLoading(false);
-    }, (error) => {
-      console.error('Error fetching analytics:', error);
-      setLoading(false);
-    });
-
-    // Clean up subscription when component unmounts
-    return () => unsubscribe();
+  const refresh = useCallback(async () => {
+    try {
+      const rows = await getClassProgress();
+      const list: ProgressCardProps[] = rows.map((r) => ({
+        username: r.username,
+        reviewedCards: r.reviewed_today,
+        isCompleted: r.reviewed_today >= DAILY_GOAL,
+      }));
+      list.sort((a, b) => (a.isCompleted === b.isCompleted ? b.reviewedCards - a.reviewedCards : a.isCompleted ? 1 : -1));
+      setUsers(list);
+    } catch (e) {
+      console.error('Failed to load daily progress:', e);
+    }
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 30000); // auto-refresh for the teacher view
+    return () => clearInterval(t);
+  }, [refresh]);
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">ความคืบหน้าประจำวัน</h1>
-        
         {loading ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">กำลังโหลด...</p>
-          </div>
+          <p className="text-gray-500 text-center py-8">กำลังโหลด...</p>
         ) : users.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-gray-500">ไม่พบข้อมูลผู้ใช้</p>
-          </div>
+          <p className="text-gray-500 text-center py-8">ไม่พบข้อมูลผู้ใช้</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {users.map((user) => (
-              <ProgressCard key={user.username} {...user} />
+            {users.map((u) => (
+              <ProgressCard key={u.username} {...u} />
             ))}
           </div>
         )}
