@@ -1,300 +1,110 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ref, get, update } from 'firebase/database';
-import { getDbInstance } from '@/services/firebaseConfig';
-import { FSRS, Card as FSRSCard } from 'ts-fsrs';
-import audioQueue from '@/services/audioService';
+import { useState, useEffect, useRef } from 'react';
+import { fetchNextCard, submitReview, GRADE, type NextCard } from '@/services/db';
 import { ColoredWord } from '@/components/ColoredWord';
-
-// Define interfaces for analytics service
-interface AnalyticsService {
-  startSession: () => void;
-  endSession: () => void;
-  logCardReview: (grade: string, elapsedTime: number, cardState: string) => void;
-  updateUserAnalytics: (username: string, reviewData: {
-    wordId: string;
-    timeUsed: number;
-    difficulty: number;
-    isMastered: boolean;
-    isCorrect: number;
-  }) => Promise<void>;
-  logProblemCard: (wordId: string, text: string, againCount: number) => void;
-}
-
-// Define Grade enum values since ts-fsrs exports it only as type
-enum Grade {
-  Again = 1,
-  Hard = 2,
-  Good = 3,
-  Easy = 4
-}
-
-interface Word {
-  id: string;
-  text: string;
-  card: FSRSCard;
-  againCount?: number;
-}
-
-interface WordData {
-  text: string;
-  card: FSRSCard;
-  againCount?: number;
-}
-
-interface FirebaseWordEntry {
-  [key: string]: WordData;
-}
-
-const fsrs = new FSRS({});
-
-// Simplified debug logging
-const logCard = (prefix: string, { text, card }: { text: string; card: FSRSCard }) => {
-  console.log(`${prefix}:`, {
-    text,
-    due: card.due ? new Date(card.due).toLocaleString() : 'none',
-    reps: card.reps,
-    state: card.state
-  });
-};
+import audioQueue from '@/services/audioService';
 
 const QuizPage = () => {
-  const [word, setWord] = useState<Word | null>(null);
+  const [card, setCard] = useState<NextCard | null>(null);
   const [flashColor, setFlashColor] = useState<string | null>(null);
-  const [cachedWords, setCachedWords] = useState<FirebaseWordEntry | null>(null);
   const startTimeRef = useRef<Date | null>(null);
-  const analyticsRef = useRef<AnalyticsService | null>(null);
+  const busyRef = useRef(false);
 
-  const preloadNextWords = useCallback(async (wordsData: FirebaseWordEntry, currentWord: string) => {
-    const now = new Date();
-    const allWords = Object.entries(wordsData)
-      .map(([id, data]) => ({ id, ...data }))
-      .filter(w => w.text !== currentWord);
-
-    // Get next due words - reduced from 3 to 2 for mobile optimization
-    const nextDueWords = allWords
-      .filter(w => w.card.due && new Date(w.card.due) <= now)
-      .sort((a, b) => new Date(a.card.due).getTime() - new Date(b.card.due).getTime())
-      .slice(0, 2);
-
-    // Get next new word - reduced from 2 to 1 for mobile optimization
-    const nextNewWords = allWords
-      .filter(w => !w.card.due)
-      .slice(0, 1);
-
-    // Preload audio for both due and new words
-    await Promise.all([
-      ...nextDueWords,
-      ...nextNewWords
-    ].map(w => audioQueue.preload(w.text)));
-
-    // Clean old cache entries
-    await audioQueue.clearOldCache();
-  }, []);
-
-  const fetchNextWord = useCallback(async (wordsData: FirebaseWordEntry) => {
-    const now = new Date();
-    
-    const dueWords = Object.entries(wordsData)
-      .map(([id, data]) => ({ id, ...data }))
-      .filter(w => w.card.due && new Date(w.card.due) <= now)
-      .sort((a, b) => new Date(a.card.due).getTime() - new Date(b.card.due).getTime());
-
-    if (dueWords.length > 0) {
-      const nextWord = dueWords[0];
-      setWord(nextWord);
-      startTimeRef.current = new Date();
-      // Preload audio for current word and next words
-      await audioQueue.preload(nextWord.text);
-      await preloadNextWords(wordsData, nextWord.text);
-    } else {
-      const newCards = Object.entries(wordsData)
-        .map(([id, data]) => ({ id, ...data }))
-        .filter(w => !w.card.due)[0];
-
-      if (newCards) {
-        newCards.card.due = now;
-        setWord(newCards);
-        startTimeRef.current = new Date();
-        // Preload audio for current word and next words
-        await audioQueue.preload(newCards.text);
-        await preloadNextWords(wordsData, newCards.text);
-      }
-    }
-  }, [preloadNextWords]);
-
-  const initializeWords = useCallback(async (username: string) => {
-    const userRef = ref(getDbInstance(), `users/${username}`);
-    const snapshot = await get(userRef);
-
-    if (snapshot.exists()) {
-      const { words }: { words: FirebaseWordEntry } = snapshot.val();
-      setCachedWords(words);
-      await fetchNextWord(words);
-    }
-  }, [fetchNextWord]);
-
-  // Load analytics service
   useEffect(() => {
-    const loadAnalytics = async () => {
-      if (typeof window === 'undefined') return;
-      try {
-        const { analyticsService } = await import('@/services/analyticsService');
-        analyticsRef.current = analyticsService;
-        analyticsService.startSession();
-      } catch (error) {
-        console.error('Failed to load analytics:', error);
-      }
-    };
-
-    loadAnalytics();
-
-    return () => {
-      if (analyticsRef.current) {
-        analyticsRef.current.endSession();
-      }
-    };
-  }, []);
-
-  // Initialize words
-  useEffect(() => {
-    const init = async () => {
-      if (typeof window === 'undefined') return;
+    let cancelled = false;
+    (async () => {
       try {
         const username = localStorage.getItem('username');
-        if (username) {
-          await initializeWords(username);
-        } else {
+        if (!username) {
           window.location.href = '/';
+          return;
         }
-      } catch (error) {
-        console.error('Failed to initialize words:', error);
-        window.location.href = '/';
+        const next = await fetchNextCard();
+        if (cancelled) return;
+        setCard(next);
+        startTimeRef.current = new Date();
+        if (next) await audioQueue.preload(next.text);
+      } catch (err) {
+        console.error('Failed to load card:', err);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
+  }, []);
 
-    init();
-  }, [initializeWords]);
+  const handleReview = async (grade: 1 | 2 | 3 | 4) => {
+    if (busyRef.current || !card) return;
+    busyRef.current = true;
 
-  const handleReview = async (grade: Grade) => {
-    if (typeof window === 'undefined') return;
-    if (!word || !cachedWords || !analyticsRef.current) return;
+    const now = new Date();
+    const elapsed = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
+
+    // Time-adjusts a "Good" press, matching the original UX.
+    let finalGrade = grade;
+    if (grade === GRADE.Good) {
+      if (elapsed <= 2) finalGrade = GRADE.Easy;
+      else if (elapsed > 5) finalGrade = GRADE.Hard;
+    }
+
+    const flash =
+      finalGrade === GRADE.Again
+        ? 'bg-red-100'
+        : finalGrade === GRADE.Hard
+        ? 'bg-orange-100'
+        : finalGrade === GRADE.Good
+        ? 'bg-yellow-100'
+        : 'bg-green-100';
+    setFlashColor(flash);
 
     try {
-      const username = localStorage.getItem('username');
-      if (!username) {
-        window.location.href = '/';
-        return;
-      }
-
-      const now = new Date();
-      const elapsedTime = (now.getTime() - (startTimeRef.current?.getTime() || 0)) / 1000;
-
-      // Determine grade based on response time
-      let finalGrade = grade;
-      if (grade === Grade.Good) {
-        if (elapsedTime <= 2) {
-          finalGrade = Grade.Easy;  // Under 2 seconds = Easy
-        } else if (elapsedTime > 5) {
-          finalGrade = Grade.Hard;  // Over 5 seconds = Hard
-        }
-        // Between 2-5 seconds stays Good
-      }
-
-      console.log(`Response time: ${elapsedTime.toFixed(1)}s -> Grade: ${finalGrade}`);
-
-      // Set color feedback
-      const color = {
-        [Grade.Again]: 'bg-red-100',
-        [Grade.Hard]: 'bg-orange-100',
-        [Grade.Good]: 'bg-yellow-100',
-        [Grade.Easy]: 'bg-green-100'
-      }[finalGrade];
-      
-      setFlashColor(color);
-
-      // Play audio after setting color
-      try {
-        await audioQueue.play(word.text);
-      } catch (error) {
-        console.error('Error playing audio:', error);
-      }
-
-      // Rest of the function remains unchanged
-      logCard('Before review', word);
-      const updatedCard = fsrs.next(word.card, now, finalGrade as unknown as import('ts-fsrs').Grade).card;
-      logCard('After review', { text: word.text, card: updatedCard });
-
-      // Track againCount separately from FSRS card
-      const againCount = grade === Grade.Again ? ((word.againCount || 0) + 1) : 0;
-
-      // Log analytics for this review with card state
-      analyticsRef.current.logCardReview(
-        grade.toString(),
-        elapsedTime,
-        String(word.card.state)
-      );
-
-      // Update user analytics with mastery based on difficulty < 5
-      await analyticsRef.current.updateUserAnalytics(username, {
-        wordId: word.id,
-        timeUsed: elapsedTime,
-        difficulty: updatedCard.difficulty,
-        isMastered: updatedCard.difficulty < 5,
-        isCorrect: finalGrade === Grade.Again ? 0 : 1  // 0 for Again (incorrect), 1 for all other grades (correct)
-      });
-
-      // Track problem cards
-      if (grade === Grade.Again) {
-        analyticsRef.current.logProblemCard(word.id, word.text, againCount);
-      }
-
-      // Update cache and Firebase
-      const updatedWords = { ...cachedWords };
-      updatedWords[word.id] = { text: word.text, card: updatedCard, againCount };
-      setCachedWords(updatedWords);
-
-      const wordRef = ref(getDbInstance(), `users/${username}/words/${word.id}`);
-      await update(wordRef, { card: updatedCard });
-
-      setTimeout(() => {
-        setFlashColor(null);
-        fetchNextWord(updatedWords);
-      }, 500);
-    } catch (error) {
-      console.error('Error handling review:', error);
+      await audioQueue.play(card.text);
+    } catch (e) {
+      console.error('Audio error:', e);
     }
+
+    try {
+      await submitReview(card.wordId, finalGrade as 1 | 2 | 3 | 4, elapsed, card.card, card.againCount);
+    } catch (e) {
+      console.error('Submit failed:', e);
+    }
+
+    setTimeout(async () => {
+      setFlashColor(null);
+      const next = await fetchNextCard();
+      setCard(next);
+      startTimeRef.current = new Date();
+      if (next) await audioQueue.preload(next.text);
+      busyRef.current = false;
+    }, 500);
   };
 
   return (
     <div className={`min-h-screen flex flex-col items-center justify-center ${flashColor || 'bg-gray-100'}`}>
       <div className="max-w-md w-full relative p-6">
-        {word ? (
+        {card ? (
           <div className="flex flex-col items-center gap-8 bg-white shadow-lg rounded-lg p-10">
-            {/* Rotated Word (upside-down, for the person across the table) */}
+            {/* Rotated (for the person across the table) */}
             <div className="absolute top-0 transform -translate-y-20 rotate-180">
               <h1 className="text-6xl font-bold text-center">
-                <ColoredWord text={word.text} />
+                <ColoredWord text={card.text} />
               </h1>
             </div>
-
-            {/* Main Word Display */}
+            {/* Main word */}
             <h1 className="text-6xl font-bold text-center">
-              <ColoredWord text={word.text} />
+              <ColoredWord text={card.text} />
             </h1>
-
-            {/* Buttons */}
             <div className="flex gap-4 w-full justify-center">
               <button
                 className="bg-red-500 text-white py-4 px-6 rounded-lg text-4xl w-1/2 hover:bg-red-600"
-                onClick={() => handleReview(Grade.Again)}
+                onClick={() => handleReview(GRADE.Again)}
               >
                 ✖
               </button>
               <button
                 className="bg-blue-500 text-white py-4 px-6 rounded-lg text-4xl w-1/2 hover:bg-blue-600"
-                onClick={() => handleReview(Grade.Good)}
+                onClick={() => handleReview(GRADE.Good)}
               >
                 ✔
               </button>

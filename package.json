@@ -9,11 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.111.0",
     "@types/js-cookie": "^3.0.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^16.4.7",
-    "firebase": "^11.0.2",
     "js-cookie": "^3.0.5",
     "lucide-react": "^0.468.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.42.0",
