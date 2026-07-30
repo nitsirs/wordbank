@@ -2,84 +2,38 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getDbInstance } from '@/services/firebaseConfig';
-import { ref, get, set } from 'firebase/database';
-import { createEmptyCard } from 'ts-fsrs';
 import Cookies from 'js-cookie';
-import wordList from './wordList.json'; 
-import { cleanObject } from '@/utils/cleanObject';
-
-interface Card {
-  due?: Date;
-}
-
-interface WordEntry {
-  text: string;
-  card: Card;
-}
-
-interface WordDictionary {
-  [key: string]: WordEntry;
-}
+import { signInStudent } from '@/services/db';
 
 export default function OnboardingPage() {
   const [username, setUsername] = useState('');
+  const [busy, setBusy] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    const savedUsername = Cookies.get('username');
-    if (savedUsername) {
-      setUsername(savedUsername); // Autofill instead of redirect
-    }
+    const saved = Cookies.get('username');
+    if (saved) setUsername(saved);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (typeof window === 'undefined') return;
+    const trimmed = username.trim();
+    if (!trimmed || busy) return;
 
-    // Trim and validate username
-    const trimmedUsername = username.trim();
-    if (!trimmedUsername) return;
-
-    const userRef = ref(getDbInstance(), `users/${trimmedUsername}`);
-    const snapshot = await get(userRef);
-
-    if (!snapshot.exists()) {
-      // Initialize new user with word list
-      const initializedWords = wordList.reduce<WordDictionary>((acc, word, index) => {
-        let card = createEmptyCard();
-        card.due = undefined;
-        card = cleanObject(card);
-
-        const paddedId = `wordId${String(index + 1).padStart(4, '0')}`;
-        acc[paddedId] = {
-          text: word,
-          card,
-        };
-        return acc;
-      }, {});
-
-      await set(userRef, { words: initializedWords });
-      // Log signup after successful initialization
+    setBusy(true);
+    try {
+      // Anonymous Supabase auth (creates a secure uid), adopts any legacy
+      // progress tied to this nickname, registers the student row.
+      await signInStudent(trimmed);
+      Cookies.set('username', trimmed, { expires: 30 });
       if (typeof window !== 'undefined') {
-        const { analyticsService } = await import('@/services/analyticsService');
-        analyticsService.logUserSignup(trimmedUsername);
+        localStorage.setItem('username', trimmed);
       }
-    } else {
-      // Log login for existing users
-      if (typeof window !== 'undefined') {
-        const { analyticsService } = await import('@/services/analyticsService');
-        analyticsService.logUserLogin(trimmedUsername);
-      }
+      router.push('/quiz');
+    } catch (err) {
+      console.error('Sign-in failed:', err);
+      setBusy(false);
     }
-
-    // Update stored username in both cookie and localStorage
-    Cookies.set('username', trimmedUsername, { expires: 30 });
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('username', trimmedUsername);
-    }
-    
-    router.push('/quiz');
   };
 
   return (
@@ -94,12 +48,14 @@ export default function OnboardingPage() {
             placeholder="ใส่ชื่อเล่น"
             className="w-full p-4 rounded-lg text-lg text-center"
             required
+            disabled={busy}
           />
           <button
             type="submit"
-            className="w-full bg-[#000000] text-white p-4 rounded-lg text-lg font-medium hover:bg-[#222] transition-colors"
+            className="w-full bg-[#000000] text-white p-4 rounded-lg text-lg font-medium hover:bg-[#222] transition-colors disabled:opacity-60"
+            disabled={busy}
           >
-            เริ่ม
+            {busy ? '...' : 'เริ่ม'}
           </button>
         </form>
       </div>
