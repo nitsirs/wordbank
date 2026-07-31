@@ -247,5 +247,31 @@ export async function submitPracticeReview(
   if (evErr) throw evErr;
 }
 
+// ----------------------------------------------------------------------------
+// /practice/comprehension, /practice/picture — non-word item practice. Feeds
+// the same review_events table (mode='comprehension'|'picture', word_id=null,
+// item_id=the item/word) so XP + leaderboard aren't a silo. Needs
+// scripts/sql/comprehension_events.sql applied first (word_id nullable).
+// ----------------------------------------------------------------------------
+
+/** Record a comprehension/picture item attempt as a review_event. */
+export async function submitItemReview(
+  mode: 'comprehension' | 'picture',
+  itemId: string,
+  correct: boolean,
+  elapsedSec: number
+): Promise<void> {
+  const uid = await ensureSession();
+  const { error } = await supabase.from('review_events').insert({
+    student_id: uid,
+    word_id: null,
+    item_id: itemId,
+    grade: correct ? GRADE.Good : GRADE.Again,
+    elapsed_sec: elapsedSec,
+    mode,
+  });
+  if (error) throw error;
+}
+
 // NOTE: class_progress RPC is now gated behind the /api/class-progress route
 // (teacher PIN + service-role key). It is no longer called from the client.

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, X, RotateCcw } from 'lucide-react';
 import { COMPREHENSION_ITEMS, type CompItem } from '@/lib/comprehensionItems';
+import { submitItemReview } from '@/services/db';
 
 // ฝึกอ่านรู้เรื่อง — real RT ป.1 past-paper MC items (ข้อสอบจริง). 3-choice,
 // immediate feedback, score tally. Mirrors the exam's ตอน ๒/๓ MC format.
@@ -21,6 +22,7 @@ export default function ComprehensionPage() {
   const [picked, setPicked] = useState<number | null>(null);
   const [score, setScore] = useState(0);
   const [done, setDone] = useState(false);
+  const shownAt = useRef(0);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('username')) {
@@ -33,10 +35,19 @@ export default function ComprehensionPage() {
   const item = order[idx];
   const total = order.length;
 
+  useEffect(() => {
+    shownAt.current = Date.now();
+  }, [idx]);
+
   const pick = (i: number) => {
     if (picked !== null) return;
     setPicked(i);
-    if (i === item.answer) setScore((s) => s + 1);
+    const correct = i === item.answer;
+    if (correct) setScore((s) => s + 1);
+    const elapsed = (Date.now() - shownAt.current) / 1000;
+    submitItemReview('comprehension', item.id, correct, elapsed).catch((e) =>
+      console.error('submit failed:', e),
+    );
   };
 
   const next = () => {

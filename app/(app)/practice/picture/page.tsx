@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Check, X, RotateCcw } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { RotateCcw } from 'lucide-react';
+import { submitItemReview } from '@/services/db';
 
 // ฝึกภาพ-คำ (ตอน ๑ ของ RT: จับคู่ภาพกับคำ). See a picture, pick the matching word.
 // Images are AI-generated flashcards (gpt-image-1-mini) for the exam's picture-vocab.
@@ -35,6 +36,7 @@ export default function PictureMatchPage() {
   const [picked, setPicked] = useState<string | null>(null);
   const [score, setScore] = useState(0);
   const [done, setDone] = useState(false);
+  const shownAt = useRef(0);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('username')) {
@@ -52,10 +54,19 @@ export default function PictureMatchPage() {
     return shuffle([cur.word, ...shuffle(others).slice(0, 2)]);
   }, [cur]);
 
+  useEffect(() => {
+    shownAt.current = Date.now();
+  }, [cur]);
+
   const pick = (w: string) => {
     if (picked !== null) return;
     setPicked(w);
-    if (w === cur.word) setScore((s) => s + 1);
+    const correct = w === cur.word;
+    if (correct) setScore((s) => s + 1);
+    const elapsed = (Date.now() - shownAt.current) / 1000;
+    submitItemReview('picture', cur.word, correct, elapsed).catch((e) =>
+      console.error('submit failed:', e),
+    );
   };
   const next = () => (idx + 1 >= total ? setDone(true) : (setIdx((i) => i + 1), setPicked(null)));
   const restart = () => { setOrder(shuffle(PICTURE_WORDS)); setIdx(0); setPicked(null); setScore(0); setDone(false); };

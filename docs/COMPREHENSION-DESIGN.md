@@ -39,6 +39,13 @@ Each correct item earns XP (same gamify engine) and counts toward the
 leaderboard/classroom — comprehension practice should feed the same progression,
 not be a silo.
 
+**Wired 2026-07-31** (`services/db.ts` `submitItemReview`): comprehension +
+picture-match pages write to the same `review_events` table as word review
+(`mode='comprehension'|'picture'`, `word_id=null`, `item_id`=the item/word),
+so leaderboard XP already includes them with no aggregation changes needed.
+Needs `scripts/sql/comprehension_events.sql` applied first (word_id → nullable)
+— pending on the Mac mini, see its handoff doc.
+
 ## Open
 - Get the official RT comprehension item bank (Tong).
 - Picture assets for picture-retell (generate? commission?).
