@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/practice/p1', label: 'ฝึกคำ' },
   { href: '/practice/sentence', label: 'ฝึกประโยค' },
   { href: '/practice/comprehension', label: 'อ่านรู้เรื่อง' },
+  { href: '/practice/picture', label: 'ภาพ-คำ' },
   { href: '/leaderboard', label: 'อันดับ' },
   { href: '/classroom', label: 'แข่งทีม' },
   { href: '/instructions', label: 'วิธีเล่น' },
