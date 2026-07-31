@@ -48,11 +48,28 @@ export default function SentencePracticePage() {
     setErr(null);
     setResult(null);
     try {
-      recRef.current = await startRecorder();
+      recRef.current = await startRecorder(16000, {
+        onAutoStop: (reason) => {
+          if (reason === 'timeout') {
+            cancelRec('ไม่ได้ยินเสียง ลองกดพูดแล้วอ่านออกเสียงดัง ๆ อีกครั้งนะ');
+          } else {
+            stopRec();
+          }
+        },
+      });
       setRecording(true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'ไม่สามารถเปิดไมโครโฟนได้');
     }
+  };
+
+  // No speech detected at all — stop the mic, don't waste a scoring call, let the child retry.
+  const cancelRec = async (message: string) => {
+    if (!recRef.current) return;
+    setRecording(false);
+    await recRef.current.stop();
+    recRef.current = null;
+    setErr(message);
   };
 
   const stopRec = async () => {
@@ -87,7 +104,9 @@ export default function SentencePracticePage() {
   return (
     <main className="min-h-[calc(100dvh-3.5rem)] bg-[#F5F6F8] flex flex-col items-center px-4 py-8">
       <h1 className="text-xl font-bold text-[#35389D] mb-1">ฝึกอ่านประโยค</h1>
-      <p className="text-gray-500 text-sm mb-8">กดอ่าน แล้วอ่านประโยคให้ดัง ๆ</p>
+      <p className="text-gray-500 text-sm mb-8">
+        {recording ? 'อ่านออกเสียงดัง ๆ ได้เลย ระบบจะตรวจให้เองเมื่ออ่านจบ' : 'กดอ่าน แล้วอ่านประโยคให้ดัง ๆ'}
+      </p>
 
       <div className="bg-white rounded-3xl shadow-sm px-6 py-12 w-full max-w-xl text-center mb-8">
         <p className="text-4xl font-bold text-[#35389D] leading-snug">{sentence}</p>
@@ -105,7 +124,7 @@ export default function SentencePracticePage() {
             '…กำลังตรวจ'
           ) : recording ? (
             <>
-              <Square className="w-5 h-5" /> หยุด + ตรวจ
+              <Square className="w-5 h-5 animate-pulse" /> กำลังฟัง… (กดเพื่อหยุดเอง)
             </>
           ) : (
             <>
